@@ -75,7 +75,8 @@ export const runRESTRequest$ = (
   pipe(
     getFinalEnvsFromPreRequest(
       tab.value.document.request.preRequestScript,
-      getCombinedEnvVariables()
+      getCombinedEnvVariables(),
+      tab.value.document.request.body.body
     ),
     TE.chain((envs) => {
       const effectiveRequest = getEffectiveRESTRequest(

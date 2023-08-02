@@ -6,6 +6,8 @@ import * as qjs from "quickjs-emscripten"
 import cloneDeep from "lodash/clone"
 import { Environment, parseTemplateStringE } from "@hoppscotch/data"
 import { getEnv, setEnv } from "./utils"
+import * as crypto from "crypto-browserify"
+import {KJUR} from 'jsrsasign'
 
 type Envs = {
   global: Environment["variables"]
@@ -14,8 +16,9 @@ type Envs = {
 
 export const execPreRequestScript = (
   preRequestScript: string,
-  envs: Envs
-): TE.TaskEither<string, Envs> =>
+  envs: Envs,
+  requestBody: string
+): TE.TaskEither<string, Envs, string> =>
   pipe(
     TE.tryCatch(
       async () => await qjs.getQuickJS(),
@@ -27,6 +30,8 @@ export const execPreRequestScript = (
       const vm = QuickJS.createVm()
 
       const pwHandle = vm.newObject()
+
+      const phHandle = vm.newObject()
 
       // Environment management APIs
       // TODO: Unified Implementation
@@ -132,6 +137,33 @@ export const execPreRequestScript = (
         }
       })
 
+      const generateHDHandle = vm.newFunction("generateHD", () => {
+        const result = crypto.createHash('sha256').update(requestBody).digest('base64')
+
+        return {
+          value: vm.newString(result),
+        }
+      })
+
+      const generateJWTHandle = vm.newFunction("generateJWT", (headerHandle, additionalClaimsHandle, privateKeyHandle) => {
+        const header: unknown = vm.dump(headerHandle)
+        const additionalClaims: unknown = vm.dump(additionalClaimsHandle)
+        const privateKey: unknown = vm.dump(privateKeyHandle)
+        const fixedClaims =  {
+          "iat": KJUR.jws.IntDate.get("now") - 5,
+          "nbf": KJUR.jws.IntDate.get("now") - 5,
+          "exp": KJUR.jws.IntDate.get("now + 1hour")
+        }
+        
+        const claimSet = Object.assign(additionalClaims, fixedClaims)
+
+        const result = KJUR.jws.JWS.sign("RS256", header, claimSet, privateKey)
+
+        return {
+          value: vm.newString(result),
+        }
+      })
+
       vm.setProp(envHandle, "resolve", envResolveHandle)
       envResolveHandle.dispose()
 
@@ -146,6 +178,15 @@ export const execPreRequestScript = (
 
       vm.setProp(pwHandle, "env", envHandle)
       envHandle.dispose()
+
+      vm.setProp(phHandle, "generateJWT", generateJWTHandle)
+      generateJWTHandle.dispose()
+
+      vm.setProp(phHandle, "generateHD", generateHDHandle)
+      generateHDHandle.dispose()
+
+      vm.setProp(vm.global, "ph", phHandle)
+      phHandle.dispose()
 
       vm.setProp(vm.global, "pw", pwHandle)
       pwHandle.dispose()
