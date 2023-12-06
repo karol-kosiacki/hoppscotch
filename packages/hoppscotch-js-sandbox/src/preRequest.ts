@@ -7,7 +7,7 @@ import cloneDeep from "lodash/clone"
 import { Environment, parseTemplateStringE } from "@hoppscotch/data"
 import { getEnv, setEnv } from "./utils"
 import * as crypto from "crypto-browserify"
-import {KJUR} from 'jsrsasign'
+import { KJUR } from "jsrsasign"
 
 type Envs = {
   global: Environment["variables"]
@@ -138,31 +138,42 @@ export const execPreRequestScript = (
       })
 
       const generateHDHandle = vm.newFunction("generateHD", () => {
-        const result = crypto.createHash('sha256').update(requestBody).digest('base64')
+        const result = crypto
+          .createHash("sha256")
+          .update(requestBody)
+          .digest("base64")
 
         return {
           value: vm.newString(result),
         }
       })
 
-      const generateJWTHandle = vm.newFunction("generateJWT", (headerHandle, additionalClaimsHandle, privateKeyHandle) => {
-        const header: unknown = vm.dump(headerHandle)
-        const additionalClaims: unknown = vm.dump(additionalClaimsHandle)
-        const privateKey: unknown = vm.dump(privateKeyHandle)
-        const fixedClaims =  {
-          "iat": KJUR.jws.IntDate.get("now") - 5,
-          "nbf": KJUR.jws.IntDate.get("now") - 5,
-          "exp": KJUR.jws.IntDate.get("now + 1hour")
-        }
-        
-        const claimSet = Object.assign(additionalClaims, fixedClaims)
+      const generateJWTHandle = vm.newFunction(
+        "generateJWT",
+        (headerHandle, additionalClaimsHandle, privateKeyHandle) => {
+          const header: unknown = vm.dump(headerHandle)
+          const additionalClaims: unknown = vm.dump(additionalClaimsHandle)
+          const privateKey: unknown = vm.dump(privateKeyHandle)
+          const fixedClaims = {
+            iat: KJUR.jws.IntDate.get("now") - 5,
+            nbf: KJUR.jws.IntDate.get("now") - 5,
+            exp: KJUR.jws.IntDate.get("now + 1hour"),
+          }
 
-        const result = KJUR.jws.JWS.sign("RS256", header, claimSet, privateKey)
+          const claimSet = Object.assign(additionalClaims, fixedClaims)
 
-        return {
-          value: vm.newString(result),
+          const result = KJUR.jws.JWS.sign(
+            "RS256",
+            header,
+            claimSet,
+            privateKey
+          )
+
+          return {
+            value: vm.newString(result),
+          }
         }
-      })
+      )
 
       vm.setProp(envHandle, "resolve", envResolveHandle)
       envResolveHandle.dispose()
