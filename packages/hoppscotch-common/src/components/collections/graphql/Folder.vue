@@ -34,7 +34,12 @@
           :icon="IconFilePlus"
           :title="t('request.new')"
           class="hidden group-hover:inline-flex"
-          @click="emit('add-request', { path: folderPath })"
+          @click="
+            emit('add-request', {
+              path: folderPath,
+              index: folder.requests.length,
+            })
+          "
         />
         <HoppButtonSecondary
           v-tippy="{ theme: 'tooltip' }"
@@ -160,25 +165,19 @@
           @duplicate-request="emit('duplicate-request', $event)"
           @select="emit('select', $event)"
         />
-        <div
+
+        <HoppSmartPlaceholder
           v-if="
             folder.folders &&
             folder.folders.length === 0 &&
             folder.requests &&
             folder.requests.length === 0
           "
-          class="flex flex-col items-center justify-center p-4 text-secondaryLight"
+          :src="`/images/states/${colorMode.value}/pack.svg`"
+          :alt="`${t('empty.folder')}`"
+          :text="t('empty.folder')"
         >
-          <img
-            :src="`/images/states/${colorMode.value}/pack.svg`"
-            loading="lazy"
-            class="inline-flex flex-col object-contain object-center w-16 h-16 mb-4"
-            :alt="`${t('empty.folder')}`"
-          />
-          <span class="text-center">
-            {{ t("empty.folder") }}
-          </span>
-        </div>
+        </HoppSmartPlaceholder>
       </div>
     </div>
     <HoppSmartConfirmModal
@@ -204,10 +203,14 @@ import { useI18n } from "@composables/i18n"
 import { useColorMode } from "@composables/theming"
 import { removeGraphqlFolder, moveGraphqlRequest } from "~/newstore/collections"
 import { computed, ref } from "vue"
+import { useService } from "dioc/vue"
+import { GQLTabService } from "~/services/tab/graphql"
 
 const toast = useToast()
 const t = useI18n()
 const colorMode = useColorMode()
+
+const tabs = useService(GQLTabService)
 
 const props = defineProps({
   picked: { type: Object, default: null },
@@ -255,10 +258,8 @@ const collectionIcon = computed(() => {
 
 const pick = () => {
   emit("select", {
-    picked: {
-      pickedType: "gql-my-folder",
-      folderPath: props.folderPath,
-    },
+    pickedType: "gql-my-folder",
+    folderPath: props.folderPath,
   })
 }
 
@@ -277,6 +278,22 @@ const removeFolder = () => {
     props.picked?.folderPath === props.folderPath
   ) {
     emit("select", { picked: null })
+  }
+
+  const possibleTabs = tabs.getTabsRefTo((tab) => {
+    const ctx = tab.document.saveContext
+
+    if (!ctx) return false
+
+    return (
+      ctx.originLocation === "user-collection" &&
+      ctx.folderPath.startsWith(props.folderPath)
+    )
+  })
+
+  for (const tab of possibleTabs) {
+    tab.value.document.saveContext = undefined
+    tab.value.document.isDirty = true
   }
 
   removeGraphqlFolder(props.folderPath, props.folder.id)

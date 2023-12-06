@@ -5,9 +5,21 @@ import { def as collectionsDef } from "./platform/collections/collections.platfo
 import { def as settingsDef } from "./platform/settings/settings.platform"
 import { def as historyDef } from "./platform/history/history.platform"
 import { def as tabStateDef } from "./platform/tabState/tabState.platform"
+import { browserInterceptor } from "@hoppscotch/common/platform/std/interceptors/browser"
+import { proxyInterceptor } from "@hoppscotch/common/platform/std/interceptors/proxy"
+import { ExtensionInspectorService } from "@hoppscotch/common/platform/std/inspections/extension.inspector"
+import { ExtensionInterceptorService } from "@hoppscotch/common/platform/std/interceptors/extension"
+import { stdFooterItems } from "@hoppscotch/common/platform/std/ui/footerItem"
+import { stdSupportOptionItems } from "@hoppscotch/common/platform/std/ui/supportOptionsItem"
+import { browserIODef } from "@hoppscotch/common/platform/std/io"
 
 createHoppApp("#app", {
+  ui: {
+    additionalFooterMenuItems: stdFooterItems,
+    additionalSupportOptionsMenuItems: stdSupportOptionItems,
+  },
   auth: authDef,
+  io: browserIODef,
   sync: {
     environments: environmentsDef,
     collections: collectionsDef,
@@ -15,7 +27,19 @@ createHoppApp("#app", {
     history: historyDef,
     tabState: tabStateDef,
   },
+  interceptors: {
+    default: "browser",
+    interceptors: [
+      { type: "standalone", interceptor: browserInterceptor },
+      { type: "standalone", interceptor: proxyInterceptor },
+      { type: "service", service: ExtensionInterceptorService },
+    ],
+  },
+  additionalInspectors: [
+    { type: "service", service: ExtensionInspectorService },
+  ],
   platformFeatureFlags: {
     exportAsGIST: false,
+    hasTelemetry: false,
   },
 })

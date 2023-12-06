@@ -20,7 +20,7 @@
           <span class="select-wrapper">
             <HoppButtonSecondary
               :label="
-                CodegenDefinitions.find((x) => x.name === codegenType).caption
+                CodegenDefinitions.find((x) => x.name === codegenType)!.caption
               "
               outline
               class="flex-1 pr-8"
@@ -56,20 +56,14 @@
                     }
                   "
                 />
-                <div
-                  v-if="
-                    !(
-                      filteredCodegenDefinitions.length !== 0 ||
-                      CodegenDefinitions.length === 0
-                    )
-                  "
-                  class="flex flex-col items-center justify-center p-4 text-secondaryLight"
+                <HoppSmartPlaceholder
+                  v-if="filteredCodegenDefinitions.length === 0"
+                  :text="`${t('state.nothing_found')} ‟${searchQuery}”`"
                 >
-                  <icon-lucide-search class="pb-2 opacity-75 svg-icons" />
-                  <span class="my-2 text-center">
-                    {{ t("state.nothing_found") }} "{{ searchQuery }}"
-                  </span>
-                </div>
+                  <template #icon>
+                    <icon-lucide-search class="pb-2 opacity-75 svg-icons" />
+                  </template>
+                </HoppSmartPlaceholder>
               </div>
             </div>
           </template>
@@ -163,9 +157,10 @@ import {
 import IconCopy from "~icons/lucide/copy"
 import IconCheck from "~icons/lucide/check"
 import IconWrapText from "~icons/lucide/wrap-text"
-import { currentActiveTab } from "~/helpers/rest/tab"
 import cloneDeep from "lodash-es/cloneDeep"
 import { platform } from "~/platform"
+import { RESTTabService } from "~/services/tab/rest"
+import { useService } from "dioc/vue"
 
 const t = useI18n()
 
@@ -179,7 +174,8 @@ const emit = defineEmits<{
 
 const toast = useToast()
 
-const request = ref(cloneDeep(currentActiveTab.value.document.request))
+const tabs = useService(RESTTabService)
+const request = ref(cloneDeep(tabs.currentActiveTab.value.document.request))
 const codegenType = ref<CodegenName>("shell-curl")
 const errorState = ref(false)
 
@@ -248,7 +244,7 @@ watch(
   () => props.show,
   (goingToShow) => {
     if (goingToShow) {
-      request.value = cloneDeep(currentActiveTab.value.document.request)
+      request.value = cloneDeep(tabs.currentActiveTab.value.document.request)
 
       platform.analytics?.logEvent({
         type: "HOPP_REST_CODEGEN_OPENED",

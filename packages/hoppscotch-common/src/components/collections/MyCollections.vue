@@ -25,14 +25,14 @@
         <HoppButtonSecondary
           v-if="!saveRequest"
           v-tippy="{ theme: 'tooltip' }"
-          :icon="IconArchive"
+          :icon="IconImport"
           :title="t('modal.import_export')"
           @click="emit('display-modal-import-export')"
         />
       </span>
     </div>
     <div class="flex flex-col flex-1">
-      <SmartTree :adapter="myAdapter">
+      <HoppSmartTree :adapter="myAdapter">
         <template
           #content="{ node, toggleChildren, isOpen, highlightChildren }"
         >
@@ -243,49 +243,48 @@
           />
         </template>
         <template #emptyNode="{ node }">
-          <div
+          <HoppSmartPlaceholder
             v-if="filterText.length !== 0 && filteredCollections.length === 0"
-            class="flex flex-col items-center justify-center p-4 text-secondaryLight"
+            :text="`${t('state.nothing_found')} ‟${filterText}”`"
           >
-            <icon-lucide-search class="pb-2 opacity-75 svg-icons" />
-            <span class="my-2 text-center">
-              {{ t("state.nothing_found") }} "{{ filterText }}"
-            </span>
-          </div>
-          <div v-else-if="node === null">
-            <div
-              class="flex flex-col items-center justify-center p-4 text-secondaryLight"
-            >
-              <img
-                :src="`/images/states/${colorMode.value}/pack.svg`"
-                loading="lazy"
-                class="inline-flex flex-col object-contain object-center w-16 h-16 mb-4"
-                :alt="`${t('empty.collections')}`"
-              />
-              <span class="pb-4 text-center">
-                {{ t("empty.collections") }}
+            <template #icon>
+              <icon-lucide-search class="pb-2 opacity-75 svg-icons" />
+            </template>
+          </HoppSmartPlaceholder>
+          <HoppSmartPlaceholder
+            v-else-if="node === null"
+            :src="`/images/states/${colorMode.value}/pack.svg`"
+            :alt="`${t('empty.collections')}`"
+            :text="t('empty.collections')"
+          >
+            <div class="flex flex-col items-center space-y-4">
+              <span class="text-secondaryLight text-center">
+                {{ t("collection.import_or_create") }}
               </span>
-              <HoppButtonSecondary
-                :label="t('add.new')"
-                filled
-                outline
-                @click="emit('display-modal-add')"
-              />
+              <div class="flex gap-4 flex-col items-stretch">
+                <HoppButtonPrimary
+                  :icon="IconImport"
+                  :label="t('import.title')"
+                  filled
+                  outline
+                  @click="emit('display-modal-import-export')"
+                />
+                <HoppButtonSecondary
+                  :icon="IconPlus"
+                  :label="t('add.new')"
+                  filled
+                  outline
+                  @click="emit('display-modal-add')"
+                />
+              </div>
             </div>
-          </div>
-          <div
+          </HoppSmartPlaceholder>
+          <HoppSmartPlaceholder
             v-else-if="node.data.type === 'collections'"
-            class="flex flex-col items-center justify-center p-4 text-secondaryLight"
+            :src="`/images/states/${colorMode.value}/pack.svg`"
+            :alt="`${t('empty.collections')}`"
+            :text="t('empty.collections')"
           >
-            <img
-              :src="`/images/states/${colorMode.value}/pack.svg`"
-              loading="lazy"
-              class="inline-flex flex-col object-contain object-center w-16 h-16 mb-4"
-              :alt="`${t('empty.collection')}`"
-            />
-            <span class="pb-4 text-center">
-              {{ t("empty.collection") }}
-            </span>
             <HoppButtonSecondary
               :label="t('add.new')"
               filled
@@ -298,41 +297,37 @@
                   })
               "
             />
-          </div>
-          <div
+          </HoppSmartPlaceholder>
+          <HoppSmartPlaceholder
             v-else-if="node.data.type === 'folders'"
-            class="flex flex-col items-center justify-center p-4 text-secondaryLight"
-          >
-            <img
-              :src="`/images/states/${colorMode.value}/pack.svg`"
-              loading="lazy"
-              class="inline-flex flex-col object-contain object-center w-16 h-16 mb-4"
-              :alt="`${t('empty.folder')}`"
-            />
-            <span class="text-center">
-              {{ t("empty.folder") }}
-            </span>
-          </div>
+            :src="`/images/states/${colorMode.value}/pack.svg`"
+            :alt="`${t('empty.folder')}`"
+            :text="t('empty.folder')"
+          />
         </template>
-      </SmartTree>
+      </HoppSmartTree>
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import IconArchive from "~icons/lucide/archive"
 import IconPlus from "~icons/lucide/plus"
 import IconHelpCircle from "~icons/lucide/help-circle"
+import IconImport from "~icons/lucide/folder-down"
 import { HoppCollection, HoppRESTRequest } from "@hoppscotch/data"
 import { computed, PropType, Ref, toRef } from "vue"
 import { GetMyTeamsQuery } from "~/helpers/backend/graphql"
-import { ChildrenResult, SmartTreeAdapter } from "~/helpers/treeAdapter"
+import {
+  ChildrenResult,
+  SmartTreeAdapter,
+} from "@hoppscotch/ui/dist/helpers/treeAdapter"
 import { useI18n } from "@composables/i18n"
 import { useColorMode } from "@composables/theming"
 import { pipe } from "fp-ts/function"
 import * as O from "fp-ts/Option"
 import { Picked } from "~/helpers/types/HoppPicked.js"
-import { currentActiveTab } from "~/helpers/rest/tab"
+import { useService } from "dioc/vue"
+import { RESTTabService } from "~/services/tab/rest"
 
 export type Collection = {
   type: "collections"
@@ -540,7 +535,8 @@ const isSelected = ({
   }
 }
 
-const active = computed(() => currentActiveTab.value.document.saveContext)
+const tabs = useService(RESTTabService)
+const active = computed(() => tabs.currentActiveTab.value.document.saveContext)
 
 const isActiveRequest = (folderPath: string, requestIndex: number) => {
   return pipe(

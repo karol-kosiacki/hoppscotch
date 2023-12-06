@@ -1,5 +1,5 @@
 <template>
-  <div>
+  <div ref="rootEl">
     <div class="flex flex-col">
       <div class="flex flex-col">
         <HoppSmartItem
@@ -15,19 +15,12 @@
         <HoppSmartSpinner class="mb-4" />
         <span class="text-secondaryLight">{{ t("state.loading") }}</span>
       </div>
-      <div
+      <HoppSmartPlaceholder
         v-if="!loading && myTeams.length === 0"
-        class="flex flex-col items-center justify-center flex-1 p-4 text-secondaryLight"
+        :src="`/images/states/${colorMode.value}/add_group.svg`"
+        :alt="`${t('empty.teams')}`"
+        :text="`${t('empty.teams')}`"
       >
-        <img
-          :src="`/images/states/${colorMode.value}/add_group.svg`"
-          loading="lazy"
-          class="inline-flex flex-col object-contain object-center w-16 h-16 mb-8"
-          :alt="`${t('empty.teams')}`"
-        />
-        <span class="mb-4 text-center">
-          {{ t("empty.teams") }}
-        </span>
         <HoppButtonSecondary
           :label="t('team.create_new')"
           filled
@@ -35,7 +28,7 @@
           :icon="IconPlus"
           @click="displayModalAdd(true)"
         />
-      </div>
+      </HoppSmartPlaceholder>
       <div v-else-if="!loading" class="flex flex-col">
         <div
           class="sticky top-0 z-10 flex items-center justify-between py-2 pl-2 mb-2 -top-2 bg-popover"
@@ -76,19 +69,20 @@
 </template>
 <script setup lang="ts">
 import { computed, ref, watch } from "vue"
-import { onLoggedIn } from "~/composables/auth"
 import { useReadonlyStream } from "~/composables/stream"
-import TeamListAdapter from "~/helpers/teams/TeamListAdapter"
 import { platform } from "~/platform"
 import { useI18n } from "@composables/i18n"
 import IconUser from "~icons/lucide/user"
 import IconUsers from "~icons/lucide/users"
 import IconPlus from "~icons/lucide/plus"
 import { useColorMode } from "@composables/theming"
-import { changeWorkspace, workspaceStatus$ } from "~/newstore/workspace"
 import { GetMyTeamsQuery } from "~/helpers/backend/graphql"
 import IconDone from "~icons/lucide/check"
 import { useLocalState } from "~/newstore/localstate"
+import { defineActionHandler } from "~/helpers/actions"
+import { WorkspaceService } from "~/services/workspace.service"
+import { useService } from "dioc/vue"
+import { useElementVisibility, useIntervalFn } from "@vueuse/core"
 
 const t = useI18n()
 const colorMode = useColorMode()
@@ -100,12 +94,36 @@ const currentUser = useReadonlyStream(
   platform.auth.getProbableUser()
 )
 
-const teamListadapter = new TeamListAdapter(true)
+const workspaceService = useService(WorkspaceService)
+const teamListadapter = workspaceService.acquireTeamListAdapter(null)
 const myTeams = useReadonlyStream(teamListadapter.teamList$, [])
 const isTeamListLoading = useReadonlyStream(teamListadapter.loading$, false)
 const teamListAdapterError = useReadonlyStream(teamListadapter.error$, null)
 const REMEMBERED_TEAM_ID = useLocalState("REMEMBERED_TEAM_ID")
 const teamListFetched = ref(false)
+
+const rootEl = ref<HTMLElement>()
+const elVisible = useElementVisibility(rootEl)
+
+const { pause: pauseListPoll, resume: resumeListPoll } = useIntervalFn(() => {
+  if (teamListadapter.isInitialized) {
+    teamListadapter.fetchList()
+  }
+}, 10000)
+
+watch(
+  elVisible,
+  () => {
+    if (elVisible.value) {
+      teamListadapter.fetchList()
+
+      resumeListPoll()
+    } else {
+      pauseListPoll()
+    }
+  },
+  { immediate: true }
+)
 
 watch(myTeams, (teams) => {
   if (teams && !teamListFetched.value) {
@@ -121,7 +139,7 @@ const loading = computed(
   () => isTeamListLoading.value && myTeams.value.length === 0
 )
 
-const workspace = useReadonlyStream(workspaceStatus$, { type: "personal" })
+const workspace = workspaceService.currentWorkspace
 
 const isActiveWorkspace = computed(() => (id: string) => {
   if (workspace.value.type === "personal") return false
@@ -130,7 +148,7 @@ const isActiveWorkspace = computed(() => (id: string) => {
 
 const switchToTeamWorkspace = (team: GetMyTeamsQuery["myTeams"][number]) => {
   REMEMBERED_TEAM_ID.value = team.id
-  changeWorkspace({
+  workspaceService.changeWorkspace({
     teamID: team.id,
     teamName: team.name,
     type: "team",
@@ -139,14 +157,10 @@ const switchToTeamWorkspace = (team: GetMyTeamsQuery["myTeams"][number]) => {
 
 const switchToPersonalWorkspace = () => {
   REMEMBERED_TEAM_ID.value = undefined
-  changeWorkspace({
+  workspaceService.changeWorkspace({
     type: "personal",
   })
 }
-
-onLoggedIn(() => {
-  teamListadapter.initialize()
-})
 
 watch(
   () => currentUser.value,
@@ -161,4 +175,14 @@ const displayModalAdd = (shouldDisplay: boolean) => {
   showModalAdd.value = shouldDisplay
   teamListadapter.fetchList()
 }
+
+defineActionHandler("modals.team.new", () => {
+  displayModalAdd(true)
+})
+
+defineActionHandler("workspace.switch.personal", switchToPersonalWorkspace)
+defineActionHandler("workspace.switch", ({ teamId }) => {
+  const team = myTeams.value.find((t) => t.id === teamId)
+  if (team) switchToTeamWorkspace(team)
+})
 </script>

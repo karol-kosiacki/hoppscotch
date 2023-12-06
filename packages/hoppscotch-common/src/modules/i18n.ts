@@ -58,7 +58,13 @@ export const FALLBACK_LANG = pipe(
 )
 
 // A reference to the i18n instance
-let i18nInstance: I18n<any, any, any> | null = null
+let i18nInstance: I18n<
+  Record<string, unknown>,
+  Record<string, unknown>,
+  Record<string, unknown>,
+  string,
+  true
+> | null = null
 
 const resolveCurrentLocale = () =>
   pipe(
@@ -113,6 +119,13 @@ export const changeAppLanguage = async (locale: string) => {
   i18nInstance.global.locale.value = locale
 
   setLocalConfig("locale", locale)
+}
+
+/**
+ * Returns the i18n instance
+ */
+export function getI18n() {
+  return i18nInstance!.global.t
 }
 
 export default <HoppModule>{

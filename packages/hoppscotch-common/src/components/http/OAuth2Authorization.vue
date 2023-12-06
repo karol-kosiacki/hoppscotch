@@ -33,18 +33,23 @@
 
 <script setup lang="ts">
 import { ref, watch } from "vue"
-import { HoppRESTAuthOAuth2, parseTemplateString } from "@hoppscotch/data"
+import {
+  HoppGQLAuthOAuth2,
+  HoppRESTAuthOAuth2,
+  parseTemplateString,
+} from "@hoppscotch/data"
 import { pluckRef } from "@composables/ref"
 import { useI18n } from "@composables/i18n"
 import { useToast } from "@composables/toast"
 import { tokenRequest } from "~/helpers/oauth"
 import { getCombinedEnvVariables } from "~/helpers/preRequest"
+import * as E from "fp-ts/Either"
 
 const t = useI18n()
 const toast = useToast()
 
 const props = defineProps<{
-  modelValue: HoppRESTAuthOAuth2
+  modelValue: HoppRESTAuthOAuth2 | HoppGQLAuthOAuth2
 }>()
 
 const emit = defineEmits<{
@@ -73,6 +78,15 @@ const clientSecret = pluckRef(auth, "clientSecret" as any)
 
 const scope = pluckRef(auth, "scope")
 
+function translateTokenRequestError(error: string) {
+  switch (error) {
+    case "OIDC_DISCOVERY_FAILED":
+      return t("authorization.oauth.token_generation_oidc_discovery_failed")
+    default:
+      return t("authorization.oauth.something_went_wrong_on_token_generation")
+  }
+}
+
 const handleAccessTokenRequest = async () => {
   if (
     oidcDiscoveryURL.value === "" &&
@@ -94,7 +108,11 @@ const handleAccessTokenRequest = async () => {
       clientSecret: parseTemplateString(clientSecret.value, envVars),
       scope: parseTemplateString(scope.value, envVars),
     }
-    await tokenRequest(tokenReqParams)
+    const res = await tokenRequest(tokenReqParams)
+
+    if (res && E.isLeft(res)) {
+      toast.error(translateTokenRequestError(res.left))
+    }
   } catch (e) {
     toast.error(`${e}`)
   }

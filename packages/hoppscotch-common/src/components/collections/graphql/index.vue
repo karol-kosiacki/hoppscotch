@@ -11,7 +11,7 @@
         type="search"
         autocomplete="off"
         :placeholder="t('action.search')"
-        class="py-2 pl-4 pr-2 bg-transparent"
+        class="py-2 pl-4 pr-2 bg-transparent !border-0"
       />
       <div
         class="flex justify-between flex-1 flex-shrink-0 border-y bg-primary border-dividerLight"
@@ -34,7 +34,7 @@
             v-if="!saveRequest"
             v-tippy="{ theme: 'tooltip' }"
             :title="t('modal.import_export')"
-            :icon="IconArchive"
+            :icon="IconImport"
             @click="displayModalImportExport(true)"
           />
         </div>
@@ -60,35 +60,42 @@
         @select="$emit('select', $event)"
       />
     </div>
-    <div
+    <HoppSmartPlaceholder
       v-if="collections.length === 0"
-      class="flex flex-col items-center justify-center p-4 text-secondaryLight"
+      :src="`/images/states/${colorMode.value}/pack.svg`"
+      :alt="`${t('empty.collections')}`"
+      :text="t('empty.collections')"
     >
-      <img
-        :src="`/images/states/${colorMode.value}/pack.svg`"
-        loading="lazy"
-        class="inline-flex flex-col object-contain object-center w-16 h-16 my-4"
-        :alt="t('empty.collections')"
-      />
-      <span class="pb-4 text-center">
-        {{ t("empty.collections") }}
-      </span>
-      <HoppButtonSecondary
-        :label="t('add.new')"
-        filled
-        outline
-        @click="displayModalAdd(true)"
-      />
-    </div>
-    <div
+      <div class="flex flex-col items-center space-y-4">
+        <span class="text-secondaryLight text-center">
+          {{ t("collection.import_or_create") }}
+        </span>
+        <div class="flex gap-4 flex-col items-stretch">
+          <HoppButtonPrimary
+            :icon="IconImport"
+            :label="t('import.title')"
+            filled
+            outline
+            @click="displayModalImportExport(true)"
+          />
+          <HoppButtonSecondary
+            :label="t('add.new')"
+            filled
+            outline
+            :icon="IconPlus"
+            @click="displayModalAdd(true)"
+          />
+        </div>
+      </div>
+    </HoppSmartPlaceholder>
+    <HoppSmartPlaceholder
       v-if="!(filteredCollections.length !== 0 || collections.length === 0)"
-      class="flex flex-col items-center justify-center p-4 text-secondaryLight"
+      :text="`${t('state.nothing_found')} ‟${filterText}”`"
     >
-      <icon-lucide-search class="pb-2 opacity-75 svg-icons" />
-      <span class="my-2 text-center">
-        {{ t("state.nothing_found") }} "{{ filterText }}"
-      </span>
-    </div>
+      <template #icon>
+        <icon-lucide-search class="pb-2 opacity-75 svg-icons" />
+      </template>
+    </HoppSmartPlaceholder>
     <CollectionsGraphqlAdd
       :show="showModalAdd"
       @hide-modal="displayModalAdd(false)"
@@ -145,15 +152,16 @@ import {
   addGraphqlFolder,
   saveGraphqlRequestAs,
 } from "~/newstore/collections"
-import { getGQLSession, setGQLSession } from "~/newstore/GQLSession"
 
 import IconPlus from "~icons/lucide/plus"
 import IconHelpCircle from "~icons/lucide/help-circle"
-import IconArchive from "~icons/lucide/archive"
+import IconImport from "~icons/lucide/folder-down"
 import { useI18n } from "@composables/i18n"
 import { useReadonlyStream } from "@composables/stream"
 import { useColorMode } from "@composables/theming"
 import { platform } from "~/platform"
+import { useService } from "dioc/vue"
+import { GQLTabService } from "~/services/tab/graphql"
 
 export default defineComponent({
   props: {
@@ -166,14 +174,16 @@ export default defineComponent({
     const collections = useReadonlyStream(graphqlCollections$, [], "deep")
     const colorMode = useColorMode()
     const t = useI18n()
+    const tabs = useService(GQLTabService)
 
     return {
       collections,
       colorMode,
       t,
+      tabs,
       IconPlus,
       IconHelpCircle,
-      IconArchive,
+      IconImport,
     }
   },
   data() {
@@ -273,17 +283,22 @@ export default defineComponent({
       this.$data.editingCollectionIndex = collectionIndex
       this.displayModalEdit(true)
     },
-    onAddRequest({ name, path }) {
+    onAddRequest({ name, path, index }) {
       const newRequest = {
-        ...getGQLSession().request,
+        ...this.tabs.currentActiveTab.value.document.request,
         name,
       }
 
       saveGraphqlRequestAs(path, newRequest)
-      setGQLSession({
+
+      this.tabs.createNewTab({
+        saveContext: {
+          originLocation: "user-collection",
+          folderPath: path,
+          requestIndex: index,
+        },
         request: newRequest,
-        schema: "",
-        response: "",
+        isDirty: false,
       })
 
       platform.analytics?.logEvent({

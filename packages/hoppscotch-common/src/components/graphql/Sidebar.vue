@@ -6,43 +6,22 @@
     render-inactive-tabs
   >
     <HoppSmartTab
-      :id="'history'"
-      :icon="IconClock"
-      :label="`${t('tab.history')}`"
-    >
-      <History :page="'graphql'" @use-history="handleUseHistory" />
-    </HoppSmartTab>
-    <HoppSmartTab
-      :id="'collections'"
-      :icon="IconFolder"
-      :label="`${t('tab.collections')}`"
-    >
-      <CollectionsGraphql />
-    </HoppSmartTab>
-    <HoppSmartTab
       :id="'docs'"
       :icon="IconBookOpen"
       :label="`${t('tab.documentation')}`"
     >
-      <div
+      <HoppSmartPlaceholder
         v-if="
           queryFields.length === 0 &&
           mutationFields.length === 0 &&
           subscriptionFields.length === 0 &&
           graphqlTypes.length === 0
         "
-        class="flex flex-col items-center justify-center p-4 text-secondaryLight"
+        :src="`/images/states/${colorMode.value}/add_comment.svg`"
+        :alt="`${t('empty.documentation')}`"
+        :text="t('empty.documentation')"
       >
-        <img
-          :src="`/images/states/${colorMode.value}/add_comment.svg`"
-          loading="lazy"
-          class="inline-flex flex-col object-contain object-center w-16 h-16 my-4"
-          :alt="`${t('empty.documentation')}`"
-        />
-        <span class="mb-4 text-center">
-          {{ t("empty.documentation") }}
-        </span>
-      </div>
+      </HoppSmartPlaceholder>
       <div v-else>
         <div
           class="sticky top-0 z-10 flex flex-shrink-0 overflow-x-auto bg-primary"
@@ -51,8 +30,8 @@
             v-model="graphqlFieldsFilterText"
             type="search"
             autocomplete="off"
+            class="flex w-full p-4 py-2 bg-transparent h-8"
             :placeholder="`${t('action.search')}`"
-            class="flex flex-1 p-4 py-2 bg-transparent"
           />
           <div class="flex">
             <HoppButtonSecondary
@@ -79,8 +58,8 @@
               v-for="(field, index) in filteredQueryFields"
               :key="`field-${index}`"
               :gql-field="field"
-              :jump-type-callback="handleJumpToType"
               class="p-4"
+              @jump-to-type="handleJumpToType"
             />
           </HoppSmartTab>
           <HoppSmartTab
@@ -93,8 +72,8 @@
               v-for="(field, index) in filteredMutationFields"
               :key="`field-${index}`"
               :gql-field="field"
-              :jump-type-callback="handleJumpToType"
               class="p-4"
+              @jump-to-type="handleJumpToType"
             />
           </HoppSmartTab>
           <HoppSmartTab
@@ -107,8 +86,8 @@
               v-for="(field, index) in filteredSubscriptionFields"
               :key="`field-${index}`"
               :gql-field="field"
-              :jump-type-callback="handleJumpToType"
               class="p-4"
+              @jump-to-type="handleJumpToType"
             />
           </HoppSmartTab>
           <HoppSmartTab
@@ -124,7 +103,7 @@
               :gql-types="graphqlTypes"
               :is-highlighted="isGqlTypeHighlighted(type)"
               :highlighted-fields="getGqlTypeHighlightedFields(type)"
-              :jump-type-callback="handleJumpToType"
+              @jump-to-type="handleJumpToType"
             />
           </HoppSmartTab>
         </HoppSmartTabs>
@@ -172,20 +151,28 @@
         ref="schemaEditor"
         class="flex flex-col flex-1"
       ></div>
-      <div
+      <HoppSmartPlaceholder
         v-else
-        class="flex flex-col items-center justify-center p-4 text-secondaryLight"
+        :src="`/images/states/${colorMode.value}/blockchain.svg`"
+        :alt="`${t('empty.schema')}`"
+        :text="t('empty.schema')"
       >
-        <img
-          :src="`/images/states/${colorMode.value}/blockchain.svg`"
-          loading="lazy"
-          class="inline-flex flex-col object-contain object-center w-16 h-16 my-4"
-          :alt="`${t('empty.schema')}`"
-        />
-        <span class="mb-4 text-center">
-          {{ t("empty.schema") }}
-        </span>
-      </div>
+      </HoppSmartPlaceholder>
+    </HoppSmartTab>
+
+    <HoppSmartTab
+      :id="'collections'"
+      :icon="IconFolder"
+      :label="`${t('tab.collections')}`"
+    >
+      <CollectionsGraphql />
+    </HoppSmartTab>
+    <HoppSmartTab
+      :id="'history'"
+      :icon="IconClock"
+      :label="`${t('tab.history')}`"
+    >
+      <History :page="'graphql'" />
     </HoppSmartTab>
   </HoppSmartTabs>
 </template>
@@ -202,29 +189,25 @@ import IconCopy from "~icons/lucide/copy"
 import IconBox from "~icons/lucide/box"
 import { computed, nextTick, reactive, ref } from "vue"
 import { GraphQLField, GraphQLType } from "graphql"
-import { map } from "rxjs/operators"
-import { GQLHeader } from "@hoppscotch/data"
 import { refAutoReset } from "@vueuse/core"
 import { useCodemirror } from "@composables/codemirror"
-import { GQLConnection } from "@helpers/GQLConnection"
 import { copyToClipboard } from "@helpers/utils/clipboard"
-import { useReadonlyStream } from "@composables/stream"
 import { useI18n } from "@composables/i18n"
 import { useToast } from "@composables/toast"
 import { useColorMode } from "@composables/theming"
 import {
-  setGQLAuth,
-  setGQLHeaders,
-  setGQLQuery,
-  setGQLResponse,
-  setGQLURL,
-  setGQLVariables,
-} from "~/newstore/GQLSession"
+  graphqlTypes,
+  mutationFields,
+  queryFields,
+  schemaString,
+  subscriptionFields,
+} from "~/helpers/graphql/connection"
+import { platform } from "~/platform"
 
 type NavigationTabs = "history" | "collection" | "docs" | "schema"
 type GqlTabs = "queries" | "mutations" | "subscriptions" | "types"
 
-const selectedNavigationTab = ref<NavigationTabs>("history")
+const selectedNavigationTab = ref<NavigationTabs>("docs")
 const selectedGqlTab = ref<GqlTabs>("queries")
 
 const t = useI18n()
@@ -284,39 +267,7 @@ function resolveRootType(type: GraphQLType) {
   return t
 }
 
-type GQLHistoryEntry = {
-  url: string
-  headers: GQLHeader[]
-  query: string
-  response: string
-  variables: string
-}
-
-const props = defineProps<{
-  conn: GQLConnection
-}>()
-
 const toast = useToast()
-
-const queryFields = useReadonlyStream(
-  props.conn.queryFields$.pipe(map((x) => x ?? [])),
-  []
-)
-
-const mutationFields = useReadonlyStream(
-  props.conn.mutationFields$.pipe(map((x) => x ?? [])),
-  []
-)
-
-const subscriptionFields = useReadonlyStream(
-  props.conn.subscriptionFields$.pipe(map((x) => x ?? [])),
-  []
-)
-
-const graphqlTypes = useReadonlyStream(
-  props.conn.graphqlTypes$.pipe(map((x) => x ?? [])),
-  []
-)
 
 const downloadSchemaIcon = refAutoReset<typeof IconDownload | typeof IconCheck>(
   IconDownload,
@@ -404,11 +355,6 @@ const handleJumpToType = async (type: GraphQLType) => {
   }
 }
 
-const schemaString = useReadonlyStream(
-  props.conn.schemaString$.pipe(map((x) => x ?? "")),
-  ""
-)
-
 const schemaEditor = ref<any | null>(null)
 const linewrapEnabled = ref(true)
 
@@ -427,21 +373,33 @@ useCodemirror(
   })
 )
 
-const downloadSchema = () => {
-  const dataToWrite = JSON.stringify(schemaString.value, null, 2)
+const downloadSchema = async () => {
+  const dataToWrite = schemaString.value
   const file = new Blob([dataToWrite], { type: "application/graphql" })
-  const a = document.createElement("a")
   const url = URL.createObjectURL(file)
-  a.href = url
-  a.download = `${url.split("/").pop()!.split("#")[0].split("?")[0]}.graphql`
-  document.body.appendChild(a)
-  a.click()
-  downloadSchemaIcon.value = IconCheck
-  toast.success(`${t("state.download_started")}`)
-  setTimeout(() => {
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  }, 1000)
+
+  const filename = `${
+    url.split("/").pop()!.split("#")[0].split("?")[0]
+  }.graphql`
+
+  URL.revokeObjectURL(url)
+
+  const result = await platform.io.saveFileWithDialog({
+    data: dataToWrite,
+    contentType: "application/graphql",
+    suggestedFilename: filename,
+    filters: [
+      {
+        name: "GraphQL Schema File",
+        extensions: ["graphql"],
+      },
+    ],
+  })
+
+  if (result.type === "unknown" || result.type === "saved") {
+    downloadSchemaIcon.value = IconCheck
+    toast.success(`${t("state.download_started")}`)
+  }
 }
 
 const copySchema = () => {
@@ -450,23 +408,10 @@ const copySchema = () => {
   copyToClipboard(schemaString.value)
   copySchemaIcon.value = IconCheck
 }
-
-const handleUseHistory = (entry: GQLHistoryEntry) => {
-  const url = entry.url
-  const headers = entry.headers
-  const gqlQueryString = entry.query
-  const variableString = entry.variables
-  const responseText = entry.response
-
-  setGQLURL(url)
-  setGQLHeaders(headers)
-  setGQLQuery(gqlQueryString)
-  setGQLVariables(variableString)
-  setGQLResponse(responseText)
-  setGQLAuth({
-    authType: "none",
-    authActive: true,
-  })
-  props.conn.reset()
-}
 </script>
+
+<style lang="scss" scoped>
+:deep(.cm-panels) {
+  @apply top-sidebarPrimaryStickyFold #{!important};
+}
+</style>

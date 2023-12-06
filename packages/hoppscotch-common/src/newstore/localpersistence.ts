@@ -9,10 +9,11 @@ import {
 import {
   settingsStore,
   bulkApplySettings,
-  defaultSettings,
+  getDefaultSettings,
   applySetting,
   HoppAccentColor,
   HoppBgColor,
+  performSettingsDataMigrations,
 } from "./settings"
 import {
   restHistoryStore,
@@ -43,12 +44,12 @@ import { SSERequest$, setSSERequest } from "./SSESession"
 import { MQTTRequest$, setMQTTRequest } from "./MQTTSession"
 import { bulkApplyLocalState, localStateStore } from "./localstate"
 import { StorageLike, watchDebounced } from "@vueuse/core"
-import {
-  loadTabsFromPersistedState,
-  persistableTabState,
-} from "~/helpers/rest/tab"
-import { debounceTime } from "rxjs"
-import { gqlSessionStore, setGQLSession } from "./GQLSession"
+import { getService } from "~/modules/dioc"
+import { RESTTabService } from "~/services/tab/rest"
+import { GQLTabService } from "~/services/tab/graphql"
+import { z } from "zod"
+import { CookieJarService } from "~/services/cookie-jar.service"
+import { watch } from "vue"
 
 function checkAndMigrateOldSettings() {
   if (window.localStorage.getItem("selectedEnvIndex")) {
@@ -80,7 +81,7 @@ function checkAndMigrateOldSettings() {
   const { postwoman } = vuexData
 
   if (!isEmpty(postwoman?.settings)) {
-    const settingsData = assign(clone(defaultSettings), postwoman.settings)
+    const settingsData = assign(clone(getDefaultSettings()), postwoman.settings)
 
     window.localStorage.setItem("settings", JSON.stringify(settingsData))
 
@@ -150,8 +151,12 @@ function setupSettingsPersistence() {
     window.localStorage.getItem("settings") || "{}"
   )
 
-  if (settingsData) {
-    bulkApplySettings(settingsData)
+  const updatedSettings = settingsData
+    ? performSettingsDataMigrations(settingsData)
+    : settingsData
+
+  if (updatedSettings) {
+    bulkApplySettings(updatedSettings)
   }
 
   settingsStore.subject$.subscribe((settings) => {
@@ -177,6 +182,35 @@ function setupHistoryPersistence() {
 
   graphqlHistoryStore.subject$.subscribe(({ state }) => {
     window.localStorage.setItem("graphqlHistory", JSON.stringify(state))
+  })
+}
+
+const cookieSchema = z.record(z.array(z.string()))
+
+function setupCookiesPersistence() {
+  const cookieJarService = getService(CookieJarService)
+
+  try {
+    const cookieData = JSON.parse(
+      window.localStorage.getItem("cookieJar") || "{}"
+    )
+
+    const parseResult = cookieSchema.safeParse(cookieData)
+
+    if (parseResult.success) {
+      for (const domain in parseResult.data) {
+        cookieJarService.bulkApplyCookiesToDomain(
+          parseResult.data[domain],
+          domain
+        )
+      }
+    }
+  } catch (e) {}
+
+  watch(cookieJarService.cookieJar, (cookieJar) => {
+    const data = JSON.stringify(Object.fromEntries(cookieJar.entries()))
+
+    window.localStorage.setItem("cookieJar", data)
   })
 }
 
@@ -313,11 +347,13 @@ function setupGlobalEnvsPersistence() {
 
 // TODO: Graceful error handling ?
 export function setupRESTTabsPersistence() {
+  const tabService = getService(RESTTabService)
+
   try {
     const state = window.localStorage.getItem("restTabState")
     if (state) {
       const data = JSON.parse(state)
-      loadTabsFromPersistedState(data)
+      tabService.loadTabsFromPersistedState(data)
     }
   } catch (e) {
     console.error(
@@ -327,7 +363,7 @@ export function setupRESTTabsPersistence() {
   }
 
   watchDebounced(
-    persistableTabState,
+    tabService.persistableTabState,
     (state) => {
       window.localStorage.setItem("restTabState", JSON.stringify(state))
     },
@@ -335,26 +371,29 @@ export function setupRESTTabsPersistence() {
   )
 }
 
-// temporary persistence for GQL session
-export function setupGQLPersistence() {
+function setupGQLTabsPersistence() {
+  const tabService = getService(GQLTabService)
+
   try {
-    const state = window.localStorage.getItem("gqlState")
+    const state = window.localStorage.getItem("gqlTabState")
     if (state) {
       const data = JSON.parse(state)
-      data["schema"] = ""
-      data["response"] = ""
-      setGQLSession(data)
+      tabService.loadTabsFromPersistedState(data)
     }
   } catch (e) {
     console.error(
-      `Failed parsing persisted GraphQL state, state:`,
-      window.localStorage.getItem("gqlState")
+      `Failed parsing persisted tab state, state:`,
+      window.localStorage.getItem("gqlTabState")
     )
   }
 
-  gqlSessionStore.subject$.pipe(debounceTime(500)).subscribe((state) => {
-    window.localStorage.setItem("gqlState", JSON.stringify(state))
-  })
+  watchDebounced(
+    tabService.persistableTabState,
+    (state) => {
+      window.localStorage.setItem("gqlTabState", JSON.stringify(state))
+    },
+    { debounce: 500, deep: true }
+  )
 }
 
 export function setupLocalPersistence() {
@@ -363,7 +402,9 @@ export function setupLocalPersistence() {
   setupLocalStatePersistence()
   setupSettingsPersistence()
   setupRESTTabsPersistence()
-  setupGQLPersistence()
+
+  setupGQLTabsPersistence()
+
   setupHistoryPersistence()
   setupCollectionsPersistence()
   setupGlobalEnvsPersistence()
@@ -373,6 +414,8 @@ export function setupLocalPersistence() {
   setupSocketIOPersistence()
   setupSSEPersistence()
   setupMQTTPersistence()
+
+  setupCookiesPersistence()
 }
 
 /**

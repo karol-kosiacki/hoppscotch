@@ -375,22 +375,37 @@ const importFromPostman = ({
   importFromHoppscotch(environments)
 }
 
-const exportJSON = () => {
+const exportJSON = async () => {
   const dataToWrite = environmentJson.value
-  const file = new Blob([dataToWrite], { type: "application/json" })
-  const a = document.createElement("a")
-  const url = URL.createObjectURL(file)
-  a.href = url
 
-  // TODO: get uri from meta
-  a.download = `${url.split("/").pop()!.split("#")[0].split("?")[0]}.json`
-  document.body.appendChild(a)
-  a.click()
-  toast.success(t("state.download_started").toString())
-  setTimeout(() => {
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  }, 1000)
+  const parsedCollections = JSON.parse(dataToWrite)
+
+  if (!parsedCollections.length) {
+    return toast.error(t("error.no_environments_to_export"))
+  }
+
+  const file = new Blob([dataToWrite], { type: "application/json" })
+  const url = URL.createObjectURL(file)
+
+  const filename = `${url.split("/").pop()!.split("#")[0].split("?")[0]}.json`
+
+  URL.revokeObjectURL(url)
+
+  const result = await platform.io.saveFileWithDialog({
+    data: dataToWrite,
+    contentType: "application/json",
+    suggestedFilename: filename,
+    filters: [
+      {
+        name: "JSON file",
+        extensions: ["json"],
+      },
+    ],
+  })
+
+  if (result.type === "unknown" || result.type === "saved") {
+    toast.success(t("state.download_started").toString())
+  }
 }
 
 const getErrorMessage = (err: GQLError<string>) => {

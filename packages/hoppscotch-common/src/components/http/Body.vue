@@ -28,7 +28,9 @@
             >
               <HoppSmartItem
                 :label="t('state.none')"
-                :info-icon="(body.contentType === null ? IconDone : null) as any"
+                :info-icon="
+                  (body.contentType === null ? IconDone : null) as any
+                "
                 :active-info-icon="body.contentType === null"
                 @click="
                   () => {
@@ -57,7 +59,9 @@
                     :key="`contentTypeItem-${contentTypeIndex}`"
                     :label="contentTypeItem"
                     :info-icon="
-                      contentTypeItem === body.contentType ? IconDone : null
+                      contentTypeItem === body.contentType
+                        ? IconDone
+                        : undefined
                     "
                     :active-info-icon="contentTypeItem === body.contentType"
                     @click="
@@ -102,17 +106,12 @@
       v-model="body"
     />
     <HttpRawBody v-else-if="body.contentType !== null" v-model="body" />
-    <div
+    <HoppSmartPlaceholder
       v-if="body.contentType == null"
-      class="flex flex-col items-center justify-center p-4 text-secondaryLight"
+      :src="`/images/states/${colorMode.value}/upload_single_file.svg`"
+      :alt="`${t('empty.body')}`"
+      :text="t('empty.body')"
     >
-      <img
-        :src="`/images/states/${colorMode.value}/upload_single_file.svg`"
-        loading="lazy"
-        class="inline-flex flex-col object-contain object-center w-16 h-16 my-4"
-        :alt="`${t('empty.body')}`"
-      />
-      <span class="pb-4 text-center">{{ t("empty.body") }}</span>
       <HoppButtonSecondary
         outline
         :label="`${t('app.documentation')}`"
@@ -120,9 +119,8 @@
         blank
         :icon="IconExternalLink"
         reverse
-        class="mb-4"
       />
-    </div>
+    </HoppSmartPlaceholder>
   </div>
 </template>
 
@@ -140,7 +138,7 @@ import IconDone from "~icons/lucide/check"
 import IconExternalLink from "~icons/lucide/external-link"
 import IconInfo from "~icons/lucide/info"
 import IconRefreshCW from "~icons/lucide/refresh-cw"
-import { RequestOptionTabs } from "./RequestOptions.vue"
+import { RESTOptionTabs } from "./RequestOptions.vue"
 
 const colorMode = useColorMode()
 const t = useI18n()
@@ -151,7 +149,7 @@ const props = defineProps<{
 }>()
 
 const emit = defineEmits<{
-  (e: "change-tab", value: RequestOptionTabs): void
+  (e: "change-tab", value: RESTOptionTabs): void
   (e: "update:headers", value: HoppRESTHeader[]): void
   (e: "update:body", value: HoppRESTReqBody): void
 }>()
@@ -168,7 +166,7 @@ const overridenContentType = computed(() =>
   )
 )
 
-const contentTypeOverride = (tab: RequestOptionTabs) => {
+const contentTypeOverride = (tab: RESTOptionTabs) => {
   emit("change-tab", tab)
   if (!isContentTypeAlreadyExist()) {
     // TODO: Fix this

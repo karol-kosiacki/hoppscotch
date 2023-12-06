@@ -9,7 +9,7 @@
           v-model="filterText"
           type="search"
           autocomplete="off"
-          class="flex flex-1 p-4 py-2 bg-transparent"
+          class="flex w-full p-4 py-2 bg-transparent h-8"
           :placeholder="`${t('action.search')}`"
         />
         <div class="flex">
@@ -105,34 +105,27 @@
           @toggle-star="toggleStar(entry.entry)"
           @delete-entry="deleteHistory(entry.entry)"
           @use-entry="useHistory(toRaw(entry.entry))"
+          @add-to-collection="addToCollection(entry.entry)"
         />
       </details>
     </div>
-    <div
+    <HoppSmartPlaceholder
       v-if="history.length === 0"
-      class="flex flex-col items-center justify-center p-4 text-secondaryLight"
+      :src="`/images/states/${colorMode.value}/history.svg`"
+      :alt="`${t('empty.history')}`"
+      :text="t('empty.history')"
     >
-      <img
-        :src="`/images/states/${colorMode.value}/history.svg`"
-        loading="lazy"
-        class="inline-flex flex-col object-contain object-center w-16 h-16 my-4"
-        :alt="`${t('empty.history')}`"
-      />
-      <span class="mb-4 text-center">
-        {{ t("empty.history") }}
-      </span>
-    </div>
-    <div
+    </HoppSmartPlaceholder>
+    <HoppSmartPlaceholder
       v-else-if="
         Object.keys(filteredHistoryGroups).length === 0 ||
         filteredHistory.length === 0
       "
-      class="flex flex-col items-center justify-center p-4 text-secondaryLight"
+      :text="`${t('state.nothing_found')} ‟${filterText || filterSelection}”`"
     >
-      <icon-lucide-search class="pb-2 opacity-75 svg-icons" />
-      <span class="mt-2 mb-4 text-center">
-        {{ t("state.nothing_found") }} "{{ filterText || filterSelection }}"
-      </span>
+      <template #icon>
+        <icon-lucide-search class="pb-2 opacity-75 svg-icons" />
+      </template>
       <HoppButtonSecondary
         :label="t('action.clear')"
         outline
@@ -143,7 +136,7 @@
           }
         "
       />
-    </div>
+    </HoppSmartPlaceholder>
     <HoppSmartConfirmModal
       :show="confirmRemove"
       :title="`${t('confirm.remove_history')}`"
@@ -183,7 +176,9 @@ import {
 
 import HistoryRestCard from "./rest/Card.vue"
 import HistoryGraphqlCard from "./graphql/Card.vue"
-import { createNewTab } from "~/helpers/rest/tab"
+import { defineActionHandler, invokeAction } from "~/helpers/actions"
+import { useService } from "dioc/vue"
+import { RESTTabService } from "~/services/tab/rest"
 
 type HistoryEntry = GQLHistoryEntry | RESTHistoryEntry
 
@@ -299,8 +294,9 @@ const clearHistory = () => {
 
 // NOTE: For GQL, the HistoryGraphqlCard component already implements useEntry
 // (That is not a really good behaviour tho ¯\_(ツ)_/¯)
+const tabs = useService(RESTTabService)
 const useHistory = (entry: RESTHistoryEntry) => {
-  createNewTab({
+  tabs.createNewTab({
     request: entry.request,
     isDirty: false,
   })
@@ -331,10 +327,22 @@ const deleteHistory = (entry: HistoryEntry) => {
   toast.success(`${t("state.deleted")}`)
 }
 
+const addToCollection = (entry: HistoryEntry) => {
+  if (props.page === "rest") {
+    invokeAction("request.save-as", {
+      request: entry.request,
+    })
+  }
+}
+
 const toggleStar = (entry: HistoryEntry) => {
   // History entry type specified because function does not know the type
   if (props.page === "rest")
     toggleRESTHistoryEntryStar(entry as RESTHistoryEntry)
   else toggleGraphqlHistoryEntryStar(entry as GQLHistoryEntry)
 }
+
+defineActionHandler("history.clear", () => {
+  confirmRemove.value = true
+})
 </script>
