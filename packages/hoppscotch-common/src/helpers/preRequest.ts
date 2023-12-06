@@ -16,5 +16,6 @@ export const getFinalEnvsFromPreRequest = (
   envs: {
     global: Environment["variables"]
     selected: Environment["variables"]
-  }
-) => runPreRequestScript(script, envs)
+  },
+  requestBody: string
+) => runPreRequestScript(script, envs, requestBody)

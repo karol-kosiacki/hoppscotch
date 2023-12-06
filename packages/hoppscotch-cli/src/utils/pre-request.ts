@@ -39,7 +39,7 @@ export const preRequestScriptRunner = (
   pipe(
     TE.of(request),
     TE.chain(({ preRequestScript }) =>
-      runPreRequestScript(preRequestScript, envs)
+      runPreRequestScript(preRequestScript, envs, request.body.body)
     ),
     TE.map(
       ({ selected, global }) =>
