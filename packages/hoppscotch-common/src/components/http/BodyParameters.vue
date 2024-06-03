@@ -1,9 +1,9 @@
 <template>
   <div>
     <div
-      class="sticky z-10 flex items-center justify-between flex-shrink-0 pl-4 overflow-x-auto border-b bg-primary border-dividerLight top-upperMobileStickyFold sm:top-upperMobileTertiaryStickyFold"
+      class="sticky top-upperMobileStickyFold z-10 flex flex-shrink-0 items-center justify-between overflow-x-auto border-b border-dividerLight bg-primary pl-4 sm:top-upperMobileTertiaryStickyFold"
     >
-      <label class="font-semibold truncate text-secondaryLight">
+      <label class="truncate font-semibold text-secondaryLight">
         {{ t("request.body") }}
       </label>
       <div class="flex">
@@ -41,7 +41,7 @@
     >
       <template #item="{ element: { entry }, index }">
         <div
-          class="flex border-b divide-x divide-dividerLight border-dividerLight draggable-content group"
+          class="draggable-content group flex divide-x divide-dividerLight border-b border-dividerLight"
         >
           <span>
             <HoppButtonSecondary
@@ -54,9 +54,9 @@
                     : null,
               }"
               :icon="IconGripVertical"
-              class="cursor-auto text-primary hover:text-primary"
+              class="opacity-0"
               :class="{
-                'draggable-handle group-hover:text-secondaryLight !cursor-grab':
+                'draggable-handle cursor-grab group-hover:opacity-100':
                   index !== workingParams?.length - 1,
               }"
               tabindex="-1"
@@ -65,6 +65,8 @@
           <SmartEnvInput
             v-model="entry.key"
             :placeholder="`${t('count.parameter', { count: index + 1 })}`"
+            :auto-complete-env="true"
+            :envs="envs"
             @change="
               updateBodyParam(index, {
                 key: $event,
@@ -75,7 +77,7 @@
             "
           />
           <div v-if="entry.isFile" class="file-chips-container">
-            <div class="space-x-2 file-chips-wrapper">
+            <div class="file-chips-wrapper space-x-1">
               <HoppSmartFileChip
                 v-for="(file, fileIndex) in entry.value"
                 :key="`param-${index}-file-${fileIndex}`"
@@ -87,6 +89,8 @@
             <SmartEnvInput
               v-model="entry.value"
               :placeholder="`${t('count.value', { count: index + 1 })}`"
+              :auto-complete-env="true"
+              :envs="envs"
               @change="
                 updateBodyParam(index, {
                   key: entry.key,
@@ -104,7 +108,7 @@
                 :name="`attachment${index}`"
                 type="file"
                 multiple
-                class="p-1 transition cursor-pointer file:transition file:cursor-pointer text-secondaryLight hover:text-secondaryDark file:mr-2 file:py-1 file:px-4 file:rounded file:border-0 file:text-tiny text-tiny file:text-secondary hover:file:text-secondaryDark file:bg-primaryLight hover:file:bg-primaryDark"
+                class="cursor-pointer p-1 text-tiny text-secondaryLight transition file:mr-2 file:cursor-pointer file:rounded file:border-0 file:bg-primaryLight file:px-4 file:py-1 file:text-tiny file:text-secondary file:transition hover:text-secondaryDark hover:file:bg-primaryDark hover:file:text-secondaryDark"
                 @change="setRequestAttachment(index, entry, $event)"
               />
             </label>
@@ -158,12 +162,14 @@
       :alt="`${t('empty.body')}`"
       :text="t('empty.body')"
     >
-      <HoppButtonSecondary
-        :label="`${t('add.new')}`"
-        filled
-        :icon="IconPlus"
-        @click="addBodyParam"
-      />
+      <template #body>
+        <HoppButtonSecondary
+          :label="`${t('add.new')}`"
+          filled
+          :icon="IconPlus"
+          @click="addBodyParam"
+        />
+      </template>
     </HoppSmartPlaceholder>
   </div>
 </template>
@@ -188,11 +194,13 @@ import { useI18n } from "@composables/i18n"
 import { useToast } from "@composables/toast"
 import { useColorMode } from "@composables/theming"
 import { useVModel } from "@vueuse/core"
+import { AggregateEnvironment } from "~/newstore/environments"
 
 type Body = HoppRESTReqBody & { contentType: "multipart/form-data" }
 
 const props = defineProps<{
   modelValue: Body
+  envs: AggregateEnvironment[]
 }>()
 
 const emit = defineEmits<{
@@ -339,7 +347,7 @@ const deleteBodyParam = (index: number) => {
   }
 
   workingParams.value = workingParams.value.filter(
-    (_, arrIndex) => arrIndex != index
+    (_, arrIndex) => arrIndex !== index
   )
 }
 

@@ -56,35 +56,36 @@
 </template>
 
 <script setup lang="ts">
-import { computed, nextTick, reactive, ref, watch } from "vue"
-import { cloneDeep } from "lodash-es"
+import { useI18n } from "@composables/i18n"
+import { useToast } from "@composables/toast"
 import {
   HoppGQLRequest,
   HoppRESTRequest,
   isHoppRESTRequest,
 } from "@hoppscotch/data"
-import { pipe } from "fp-ts/function"
+import { computedWithControl } from "@vueuse/core"
+import { useService } from "dioc/vue"
 import * as TE from "fp-ts/TaskEither"
-import { GetMyTeamsQuery } from "~/helpers/backend/graphql"
+import { pipe } from "fp-ts/function"
+import { cloneDeep } from "lodash-es"
+import { computed, nextTick, reactive, ref, watch } from "vue"
+import { GQLError } from "~/helpers/backend/GQLClient"
 import {
   createRequestInCollection,
   updateTeamRequest,
 } from "~/helpers/backend/mutations/TeamRequest"
 import { Picked } from "~/helpers/types/HoppPicked"
-import { useI18n } from "@composables/i18n"
-import { useToast } from "@composables/toast"
 import {
+  cascadeParentCollectionForHeaderAuth,
   editGraphqlRequest,
   editRESTRequest,
   saveGraphqlRequestAs,
   saveRESTRequestAs,
 } from "~/newstore/collections"
-import { GQLError } from "~/helpers/backend/GQLClient"
-import { computedWithControl } from "@vueuse/core"
 import { platform } from "~/platform"
-import { useService } from "dioc/vue"
-import { RESTTabService } from "~/services/tab/rest"
 import { GQLTabService } from "~/services/tab/graphql"
+import { RESTTabService } from "~/services/tab/rest"
+import { TeamWorkspace } from "~/services/workspace.service"
 
 const t = useI18n()
 const toast = useToast()
@@ -92,12 +93,10 @@ const toast = useToast()
 const RESTTabs = useService(RESTTabService)
 const GQLTabs = useService(GQLTabService)
 
-type SelectedTeam = GetMyTeamsQuery["myTeams"][number] | undefined
-
 type CollectionType =
   | {
       type: "team-collections"
-      selectedTeam: SelectedTeam
+      selectedTeam: TeamWorkspace
     }
   | { type: "my-collections"; selectedTeam: undefined }
 
@@ -141,9 +140,8 @@ const reqName = computed(() => {
     return props.request.name
   } else if (props.mode === "rest") {
     return restRequestName.value
-  } else {
-    return gqlRequestName.value
   }
+  return gqlRequestName.value
 })
 
 const requestName = ref(reqName.value)
@@ -192,7 +190,7 @@ watch(
   }
 )
 
-const updateTeam = (newTeam: SelectedTeam) => {
+const updateTeam = (newTeam: TeamWorkspace) => {
   collectionsType.value.selectedTeam = newTeam
 }
 
@@ -240,6 +238,16 @@ const saveRequestAs = async () => {
       },
     }
 
+    const { auth, headers } = cascadeParentCollectionForHeaderAuth(
+      `${picked.value.collectionIndex}`,
+      "rest"
+    )
+
+    RESTTabs.currentActiveTab.value.document.inheritedProperties = {
+      auth,
+      headers,
+    }
+
     platform.analytics?.logEvent({
       type: "HOPP_SAVE_REQUEST",
       createdNow: true,
@@ -265,6 +273,16 @@ const saveRequestAs = async () => {
         folderPath: picked.value.folderPath,
         requestIndex: insertionIndex,
       },
+    }
+
+    const { auth, headers } = cascadeParentCollectionForHeaderAuth(
+      picked.value.folderPath,
+      "rest"
+    )
+
+    RESTTabs.currentActiveTab.value.document.inheritedProperties = {
+      auth,
+      headers,
     }
 
     platform.analytics?.logEvent({
@@ -293,6 +311,16 @@ const saveRequestAs = async () => {
         folderPath: picked.value.folderPath,
         requestIndex: picked.value.requestIndex,
       },
+    }
+
+    const { auth, headers } = cascadeParentCollectionForHeaderAuth(
+      picked.value.folderPath,
+      "rest"
+    )
+
+    RESTTabs.currentActiveTab.value.document.inheritedProperties = {
+      auth,
+      headers,
     }
 
     platform.analytics?.logEvent({
@@ -379,6 +407,16 @@ const saveRequestAs = async () => {
       workspaceType: "team",
     })
 
+    const { auth, headers } = cascadeParentCollectionForHeaderAuth(
+      picked.value.folderPath,
+      "graphql"
+    )
+
+    GQLTabs.currentActiveTab.value.document.inheritedProperties = {
+      auth,
+      headers,
+    }
+
     requestSaved()
   } else if (picked.value.pickedType === "gql-my-folder") {
     // TODO: Check for GQL request ?
@@ -394,6 +432,16 @@ const saveRequestAs = async () => {
       workspaceType: "team",
     })
 
+    const { auth, headers } = cascadeParentCollectionForHeaderAuth(
+      picked.value.folderPath,
+      "graphql"
+    )
+
+    GQLTabs.currentActiveTab.value.document.inheritedProperties = {
+      auth,
+      headers,
+    }
+
     requestSaved()
   } else if (picked.value.pickedType === "gql-my-collection") {
     // TODO: Check for GQL request ?
@@ -408,6 +456,16 @@ const saveRequestAs = async () => {
       platform: "gql",
       workspaceType: "team",
     })
+
+    const { auth, headers } = cascadeParentCollectionForHeaderAuth(
+      `${picked.value.collectionIndex}`,
+      "graphql"
+    )
+
+    GQLTabs.currentActiveTab.value.document.inheritedProperties = {
+      auth,
+      headers,
+    }
 
     requestSaved()
   }
@@ -433,7 +491,7 @@ const updateTeamCollectionOrFolder = (
   const data = {
     title: requestUpdated.name,
     request: JSON.stringify(requestUpdated),
-    teamID: collectionsType.value.selectedTeam.id,
+    teamID: collectionsType.value.selectedTeam.teamID,
   }
   pipe(
     createRequestInCollection(collectionID, data),
@@ -480,21 +538,20 @@ const getErrorMessage = (err: GQLError<string>) => {
   console.error(err)
   if (err.type === "network_error") {
     return t("error.network_error")
-  } else {
-    switch (err.error) {
-      case "team_coll/short_title":
-        return t("collection.name_length_insufficient")
-      case "team/invalid_coll_id":
-        return t("team.invalid_id")
-      case "team/not_required_role":
-        return t("profile.no_permission")
-      case "team_req/not_required_role":
-        return t("profile.no_permission")
-      case "Forbidden resource":
-        return t("profile.no_permission")
-      default:
-        return t("error.something_went_wrong")
-    }
+  }
+  switch (err.error) {
+    case "team_coll/short_title":
+      return t("collection.name_length_insufficient")
+    case "team/invalid_coll_id":
+      return t("team.invalid_id")
+    case "team/not_required_role":
+      return t("profile.no_permission")
+    case "team_req/not_required_role":
+      return t("profile.no_permission")
+    case "Forbidden resource":
+      return t("profile.no_permission")
+    default:
+      return t("error.something_went_wrong")
   }
 }
 </script>

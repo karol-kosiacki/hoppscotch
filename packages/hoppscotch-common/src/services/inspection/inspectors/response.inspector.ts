@@ -23,9 +23,7 @@ export class ResponseInspectorService extends Service implements Inspector {
 
   private readonly inspection = this.bind(InspectionService)
 
-  constructor() {
-    super()
-
+  override onServiceInit() {
     this.inspection.registerInspector(this)
   }
 
@@ -67,7 +65,7 @@ export class ResponseInspectorService extends Service implements Inspector {
           },
           doc: {
             text: this.t("action.learn_more"),
-            link: "https://docs.hoppscotch.io/",
+            link: "https://docs.hoppscotch.io/documentation/features/inspections",
           },
         })
       }

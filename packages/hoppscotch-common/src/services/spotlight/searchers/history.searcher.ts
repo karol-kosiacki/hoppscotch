@@ -66,9 +66,7 @@ export class HistorySpotlightSearcherService
     }
   )[0]
 
-  constructor() {
-    super()
-
+  override onServiceInit() {
     this.spotlight.registerSearcher(this)
   }
 
@@ -190,23 +188,22 @@ export class HistorySpotlightSearcherService
                     },
                   },
                 }
-              } else {
-                // Assume gql
-                const entry =
-                  graphqlHistoryStore.value.state[parseInt(x.id.split("-")[1])]
+              }
+              // Assume gql
+              const entry =
+                graphqlHistoryStore.value.state[parseInt(x.id.split("-")[1])]
 
-                return {
-                  id: x.id,
-                  icon: markRaw(IconHistory),
-                  score: x.score,
-                  text: {
-                    type: "custom",
-                    component: markRaw(SpotlightGQLHistoryEntry),
-                    componentProps: {
-                      historyEntry: entry,
-                    },
+              return {
+                id: x.id,
+                icon: markRaw(IconHistory),
+                score: x.score,
+                text: {
+                  type: "custom",
+                  component: markRaw(SpotlightGQLHistoryEntry),
+                  componentProps: {
+                    historyEntry: entry,
                   },
-                }
+                },
               }
             })
         },

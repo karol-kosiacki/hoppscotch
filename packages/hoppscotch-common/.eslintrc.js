@@ -10,6 +10,9 @@ module.exports = {
   parserOptions: {
     sourceType: "module",
     requireConfigFile: false,
+    ecmaFeatures: {
+      jsx: false,
+    },
   },
   extends: [
     "@vue/typescript/recommended",
@@ -57,7 +60,7 @@ module.exports = {
       {
         name: "localStorage",
         message:
-          "Do not use 'localStorage' directly. Please use localpersistence.ts functions or stores",
+          "Do not use 'localStorage' directly. Please use the PersistenceService",
       },
     ],
     // window.localStorage block
@@ -66,8 +69,10 @@ module.exports = {
       {
         selector: "CallExpression[callee.object.property.name='localStorage']",
         message:
-          "Do not use 'localStorage' directly. Please use localpersistence.ts functions or stores",
+          "Do not use 'localStorage' directly. Please use the PersistenceService",
       },
     ],
+    eqeqeq: 1,
+    "no-else-return": 1,
   },
 }

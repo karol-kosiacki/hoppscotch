@@ -22,9 +22,7 @@ export class HeaderInspectorService extends Service implements Inspector {
   private readonly inspection = this.bind(InspectionService)
   private readonly interceptorService = this.bind(InterceptorService)
 
-  constructor() {
-    super()
-
+  override onServiceInit() {
     this.inspection.registerInspector(this)
   }
 
@@ -66,8 +64,8 @@ export class HeaderInspectorService extends Service implements Inspector {
                 index: index,
               },
               doc: {
-                text: this.t("action.learn_more"),
-                link: "https://docs.hoppscotch.io/",
+                text: this.t("action.download_here"),
+                link: "https://hoppscotch.com/download",
               },
             })
           }

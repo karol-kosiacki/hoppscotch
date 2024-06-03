@@ -12,21 +12,56 @@ import { parseTemplateStringE } from "@hoppscotch/data"
 import { StreamSubscriberFunc } from "@composables/stream"
 import {
   AggregateEnvironment,
-  aggregateEnvs$,
+  aggregateEnvsWithSecrets$,
   getAggregateEnvs,
+  getCurrentEnvironment,
   getSelectedEnvironmentType,
 } from "~/newstore/environments"
 import { invokeAction } from "~/helpers/actions"
 import IconUser from "~icons/lucide/user?raw"
 import IconUsers from "~icons/lucide/users?raw"
 import IconEdit from "~icons/lucide/edit?raw"
+import { SecretEnvironmentService } from "~/services/secret-environment.service"
+import { getService } from "~/modules/dioc"
+import { RESTTabService } from "~/services/tab/rest"
 
 const HOPP_ENVIRONMENT_REGEX = /(<<[a-zA-Z0-9-_]+>>)/g
 
 const HOPP_ENV_HIGHLIGHT =
   "cursor-help transition rounded px-1 focus:outline-none mx-0.5 env-highlight"
-const HOPP_ENV_HIGHLIGHT_FOUND = "env-found"
-const HOPP_ENV_HIGHLIGHT_NOT_FOUND = "env-not-found"
+
+const HOPP_REQUEST_VARIABLE_HIGHLIGHT = "request-variable-highlight"
+const HOPP_ENVIRONMENT_HIGHLIGHT = "environment-variable-highlight"
+const HOPP_GLOBAL_ENVIRONMENT_HIGHLIGHT = "global-variable-highlight"
+const HOPP_ENV_HIGHLIGHT_NOT_FOUND = "environment-not-found-highlight"
+
+const secretEnvironmentService = getService(SecretEnvironmentService)
+const restTabs = getService(RESTTabService)
+
+/**
+ * Transforms the environment list to a list with unique keys with value
+ * @param envs The environment list to be transformed
+ * @returns The transformed environment list with keys with value
+ */
+const filterNonEmptyEnvironmentVariables = (
+  envs: AggregateEnvironment[]
+): AggregateEnvironment[] => {
+  const envsMap = new Map<string, AggregateEnvironment>()
+
+  envs.forEach((env) => {
+    if (envsMap.has(env.key)) {
+      const existingEnv = envsMap.get(env.key)
+
+      if (existingEnv?.value === "" && env.value !== "") {
+        envsMap.set(env.key, env)
+      }
+    } else {
+      envsMap.set(env.key, env)
+    }
+  })
+
+  return Array.from(envsMap.values())
+}
 
 const cursorTooltipField = (aggregateEnvs: AggregateEnvironment[]) =>
   hoverTooltip(
@@ -62,15 +97,45 @@ const cursorTooltipField = (aggregateEnvs: AggregateEnvironment[]) =>
 
       const parsedEnvKey = text.slice(start - from, end - from)
 
-      const tooltipEnv = aggregateEnvs.find((env) => env.key === parsedEnvKey)
+      const envsWithNoEmptyValues =
+        filterNonEmptyEnvironmentVariables(aggregateEnvs)
+
+      const tooltipEnv = envsWithNoEmptyValues.find(
+        (env) => env.key === parsedEnvKey
+      )
 
       const envName = tooltipEnv?.sourceEnv ?? "Choose an Environment"
 
-      const envValue = tooltipEnv?.value ?? "Not found"
+      let envValue = "Not Found"
+
+      const currentSelectedEnvironment = getCurrentEnvironment()
+
+      const hasSecretEnv = secretEnvironmentService.hasSecretValue(
+        tooltipEnv?.sourceEnv !== "Global"
+          ? currentSelectedEnvironment.id
+          : "Global",
+        tooltipEnv?.key ?? ""
+      )
+
+      if (!tooltipEnv?.secret && tooltipEnv?.value) envValue = tooltipEnv.value
+      else if (tooltipEnv?.secret && hasSecretEnv) {
+        envValue = "******"
+      } else if (tooltipEnv?.secret && !hasSecretEnv) {
+        envValue = "Empty"
+      } else if (!tooltipEnv?.sourceEnv) {
+        envValue = "Not Found"
+      } else if (!tooltipEnv?.value) {
+        envValue = "Empty"
+      }
 
       const result = parseTemplateStringE(envValue, aggregateEnvs)
 
-      const finalEnv = E.isLeft(result) ? "error" : result.right
+      let finalEnv = E.isLeft(result) ? "error" : result.right
+
+      // If the request variable has an secret variable
+      // parseTemplateStringE is passed the secret value which has value undefined
+      // So, we need to check if the result is undefined and then set the finalEnv to ******
+      if (finalEnv === "undefined") finalEnv = "******"
 
       const selectedEnvType = getSelectedEnvironmentType()
 
@@ -83,13 +148,31 @@ const cursorTooltipField = (aggregateEnvs: AggregateEnvironment[]) =>
         editIcon.className =
           "ml-2 cursor-pointer text-accent hover:text-accentDark"
         editIcon.addEventListener("click", () => {
-          const isPersonalEnv =
-            envName === "Global" || selectedEnvType !== "TEAM_ENV"
-          const action = isPersonalEnv ? "my" : "team"
-          invokeAction(`modals.${action}.environment.edit`, {
-            envName,
-            variableName: parsedEnvKey,
-          })
+          let invokeActionType:
+            | "modals.my.environment.edit"
+            | "modals.team.environment.edit"
+            | "modals.global.environment.update" = "modals.my.environment.edit"
+
+          if (tooltipEnv?.sourceEnv === "Global") {
+            invokeActionType = "modals.global.environment.update"
+          } else if (selectedEnvType === "MY_ENV") {
+            invokeActionType = "modals.my.environment.edit"
+          } else if (selectedEnvType === "TEAM_ENV") {
+            invokeActionType = "modals.team.environment.edit"
+          } else {
+            invokeActionType = "modals.my.environment.edit"
+          }
+
+          if (tooltipEnv?.sourceEnv === "RequestVariable") {
+            restTabs.currentActiveTab.value.document.optionTabPreference =
+              "requestVariables"
+          } else {
+            invokeAction(invokeActionType, {
+              envName: tooltipEnv?.sourceEnv === "Global" ? "Global" : envName,
+              variableName: parsedEnvKey,
+              isSecret: tooltipEnv?.secret,
+            })
+          }
         })
         editIcon.innerHTML = `<span class="inline-flex items-center justify-center my-1">${IconEdit}</span>`
         tooltip.appendChild(editIcon)
@@ -127,11 +210,16 @@ const cursorTooltipField = (aggregateEnvs: AggregateEnvironment[]) =>
   )
 
 function checkEnv(env: string, aggregateEnvs: AggregateEnvironment[]) {
-  const className = aggregateEnvs.find(
+  let className = HOPP_ENV_HIGHLIGHT_NOT_FOUND
+
+  const envSource = aggregateEnvs.find(
     (k: { key: string }) => k.key === env.slice(2, -2)
-  )
-    ? HOPP_ENV_HIGHLIGHT_FOUND
-    : HOPP_ENV_HIGHLIGHT_NOT_FOUND
+  )?.sourceEnv
+
+  if (envSource === "RequestVariable")
+    className = HOPP_REQUEST_VARIABLE_HIGHLIGHT
+  else if (envSource === "Global") className = HOPP_GLOBAL_ENVIRONMENT_HIGHLIGHT
+  else if (envSource !== undefined) className = HOPP_ENVIRONMENT_HIGHLIGHT
 
   return Decoration.mark({
     class: `${HOPP_ENV_HIGHLIGHT} ${className}`,
@@ -147,7 +235,10 @@ const getMatchDecorator = (aggregateEnvs: AggregateEnvironment[]) =>
 export const environmentHighlightStyle = (
   aggregateEnvs: AggregateEnvironment[]
 ) => {
-  const decorator = getMatchDecorator(aggregateEnvs)
+  const envsWithNoEmptyValues =
+    filterNonEmptyEnvironmentVariables(aggregateEnvs)
+
+  const decorator = getMatchDecorator(envsWithNoEmptyValues)
 
   return ViewPlugin.define(
     (view) => ({
@@ -171,10 +262,44 @@ export class HoppEnvironmentPlugin {
     subscribeToStream: StreamSubscriberFunc,
     private editorView: Ref<EditorView | undefined>
   ) {
-    this.envs = getAggregateEnvs()
+    const aggregateEnvs = getAggregateEnvs()
+    const currentTab = restTabs.currentActiveTab.value
 
-    subscribeToStream(aggregateEnvs$, (envs) => {
-      this.envs = envs
+    watch(
+      currentTab.document.request,
+      (reqVariables) => {
+        this.envs = [
+          ...reqVariables.requestVariables.map(({ key, value }) => ({
+            key,
+            value,
+            sourceEnv: "RequestVariable",
+            secret: false,
+          })),
+          ...aggregateEnvs,
+        ]
+
+        this.editorView.value?.dispatch({
+          effects: this.compartment.reconfigure([
+            cursorTooltipField(this.envs),
+            environmentHighlightStyle(this.envs),
+          ]),
+        })
+      },
+      { immediate: true, deep: true }
+    )
+
+    subscribeToStream(aggregateEnvsWithSecrets$, (envs) => {
+      this.envs = [
+        ...currentTab.document.request.requestVariables.map(
+          ({ key, value }) => ({
+            key,
+            value,
+            sourceEnv: "RequestVariable",
+            secret: false,
+          })
+        ),
+        ...envs,
+      ]
 
       this.editorView.value?.dispatch({
         effects: this.compartment.reconfigure([
@@ -214,7 +339,7 @@ export class HoppReactiveEnvPlugin {
           ]),
         })
       },
-      { immediate: true }
+      { immediate: true, deep: true }
     )
   }
 

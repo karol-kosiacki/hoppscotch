@@ -1,6 +1,6 @@
-import { TypedDocumentNode, useClientHandle } from '@urql/vue';
+import { onMounted, ref, Ref } from 'vue';
 import { DocumentNode } from 'graphql';
-import { onMounted, ref } from 'vue';
+import { TypedDocumentNode, useClientHandle } from '@urql/vue';
 
 export function usePagedQuery<
   Result,
@@ -9,41 +9,51 @@ export function usePagedQuery<
 >(
   query: string | TypedDocumentNode<Result, Vars> | DocumentNode,
   getList: (result: Result) => ListItem[],
-  getCursor: (value: ListItem) => string,
   itemsPerPage: number,
-  variables: Vars
+  baseVariables: Vars,
+  getCursor?: (value: ListItem) => string
 ) {
-  //Fetch All Users
   const { client } = useClientHandle();
   const fetching = ref(true);
   const error = ref(false);
-  const list = ref<ListItem[]>([]);
+  const list: Ref<ListItem[]> = ref([]);
   const currentPage = ref(0);
   const hasNextPage = ref(true);
 
-  const fetchNextPage = async () => {
+  const fetchNextPage = async (additionalVariables?: Vars) => {
+    let variables = { ...baseVariables };
+
     fetching.value = true;
-    try {
-      const result = await client
-        .query(query, {
-          ...variables,
-          take: itemsPerPage,
-          cursor:
-            list.value.length > 0 ? getCursor(list.value.at(-1)) : undefined,
-        })
-        .toPromise();
 
-      const resultList = getList(result.data!);
-
-      if (resultList.length < itemsPerPage) {
-        hasNextPage.value = false;
-      }
-
-      list.value.push(...resultList);
-      currentPage.value++;
-    } catch (e) {
-      error.value = true;
+    // Cursor based pagination
+    if (getCursor) {
+      const cursor =
+        list.value.length > 0
+          ? getCursor(list.value.at(-1) as ListItem)
+          : undefined;
+      variables = { ...variables, cursor };
     }
+    // Offset based pagination
+    else if (additionalVariables) {
+      variables = { ...variables, ...additionalVariables };
+    }
+
+    const result = await client.query(query, variables).toPromise();
+    if (result.error) {
+      error.value = true;
+      fetching.value = false;
+      return;
+    }
+
+    const resultList = getList(result.data!);
+
+    if (resultList.length < itemsPerPage) {
+      hasNextPage.value = false;
+    }
+
+    list.value.push(...resultList);
+    currentPage.value++;
+
     fetching.value = false;
   };
 
@@ -57,11 +67,14 @@ export function usePagedQuery<
     }
   };
 
-  const refetch = async () => {
+  const refetch = async (variables?: Vars) => {
     currentPage.value = 0;
     hasNextPage.value = true;
     list.value = [];
-    await fetchNextPage();
+
+    if (hasNextPage.value) {
+      variables ? await fetchNextPage(variables) : await fetchNextPage();
+    }
   };
 
   return {

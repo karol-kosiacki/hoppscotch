@@ -4,6 +4,7 @@
       <HoppButtonSecondary
         :label="`${t('team.create_new')}`"
         outline
+        :icon="IconPlus"
         @click="displayModalAdd(true)"
       />
       <div v-if="loading" class="flex flex-col items-center justify-center">
@@ -16,11 +17,6 @@
         :alt="`${t('empty.teams')}`"
         :text="`${t('empty.teams')}`"
       >
-        <HoppButtonSecondary
-          :label="`${t('team.create_new')}`"
-          filled
-          @click="displayModalAdd(true)"
-        />
       </HoppSmartPlaceholder>
       <div
         v-else-if="!loading"
@@ -37,10 +33,11 @@
           :compact="modal"
           @edit-team="editTeam(team, team.id)"
           @invite-team="inviteTeam(team, team.id)"
+          @refetch-teams="refetchTeams"
         />
       </div>
       <div v-if="!loading && adapterError" class="flex flex-col items-center">
-        <icon-lucide-help-circle class="mb-4 svg-icons" />
+        <icon-lucide-help-circle class="svg-icons mb-4" />
         {{ t("error.something_went_wrong") }}
       </div>
     </div>
@@ -74,6 +71,7 @@ import { useReadonlyStream } from "@composables/stream"
 import { useColorMode } from "@composables/theming"
 import { WorkspaceService } from "~/services/workspace.service"
 import { useService } from "dioc/vue"
+import IconPlus from "~icons/lucide/plus"
 
 const t = useI18n()
 

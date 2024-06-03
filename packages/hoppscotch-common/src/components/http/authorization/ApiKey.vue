@@ -1,9 +1,19 @@
 <template>
   <div class="flex flex-1 border-b border-dividerLight">
-    <SmartEnvInput v-model="auth.key" placeholder="Key" />
+    <SmartEnvInput
+      v-model="auth.key"
+      :auto-complete-env="true"
+      placeholder="Key"
+      :envs="envs"
+    />
   </div>
   <div class="flex flex-1 border-b border-dividerLight">
-    <SmartEnvInput v-model="auth.value" placeholder="Value" />
+    <SmartEnvInput
+      v-model="auth.value"
+      :auto-complete-env="true"
+      placeholder="Value"
+      :envs="envs"
+    />
   </div>
   <div class="flex items-center border-b border-dividerLight">
     <span class="flex items-center">
@@ -16,12 +26,18 @@
         theme="popover"
         :on-shown="() => authTippyActions.focus()"
       >
-        <span class="select-wrapper">
+        <HoppSmartSelectWrapper>
           <HoppButtonSecondary
-            :label="auth.addTo || t('state.none')"
-            class="pr-8 ml-2 rounded-none"
+            :label="
+              auth.addTo
+                ? auth.addTo === 'HEADERS'
+                  ? t('authorization.pass_by_headers_label')
+                  : t('authorization.pass_by_query_params_label')
+                : t('state.none')
+            "
+            class="ml-2 rounded-none pr-8"
           />
-        </span>
+        </HoppSmartSelectWrapper>
         <template #content="{ hide }">
           <div
             ref="authTippyActions"
@@ -30,23 +46,23 @@
             @keyup.escape="hide()"
           >
             <HoppSmartItem
-              :icon="auth.addTo === 'Headers' ? IconCircleDot : IconCircle"
-              :active="auth.addTo === 'Headers'"
-              :label="'Headers'"
+              :icon="auth.addTo === 'HEADERS' ? IconCircleDot : IconCircle"
+              :active="auth.addTo === 'HEADERS'"
+              :label="t('authorization.pass_by_headers_label')"
               @click="
                 () => {
-                  auth.addTo = 'Headers'
+                  auth.addTo = 'HEADERS'
                   hide()
                 }
               "
             />
             <HoppSmartItem
-              :icon="auth.addTo === 'Query params' ? IconCircleDot : IconCircle"
-              :active="auth.addTo === 'Query params'"
-              :label="'Query params'"
+              :icon="auth.addTo === 'QUERY_PARAMS' ? IconCircleDot : IconCircle"
+              :active="auth.addTo === 'QUERY_PARAMS'"
+              :label="t('authorization.pass_by_query_params_label')"
               @click="
                 () => {
-                  auth.addTo = 'Query params'
+                  auth.addTo = 'QUERY_PARAMS'
                   hide()
                 }
               "
@@ -65,11 +81,13 @@ import { useI18n } from "@composables/i18n"
 import { HoppRESTAuthAPIKey } from "@hoppscotch/data"
 import { useVModel } from "@vueuse/core"
 import { ref } from "vue"
+import { AggregateEnvironment } from "~/newstore/environments"
 
 const t = useI18n()
 
 const props = defineProps<{
   modelValue: HoppRESTAuthAPIKey
+  envs?: AggregateEnvironment[]
 }>()
 
 const emit = defineEmits<{

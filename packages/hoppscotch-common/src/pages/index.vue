@@ -26,12 +26,13 @@
                 @close-tab="removeTab(tab.id)"
                 @close-other-tabs="closeOtherTabsAction(tab.id)"
                 @duplicate-tab="duplicateTab(tab.id)"
+                @share-tab-request="shareTabRequest(tab.id)"
               />
             </template>
             <template #suffix>
               <span
                 v-if="tab.document.isDirty"
-                class="flex items-center justify-center text-secondary group-hover:hidden w-4"
+                class="flex w-4 items-center justify-center text-secondary group-hover:hidden"
               >
                 <svg
                   viewBox="0 0 24 24"
@@ -64,19 +65,42 @@
       @hide-modal="showRenamingReqNameModal = false"
     />
     <HoppSmartConfirmModal
-      :show="confirmingCloseForTabID !== null"
-      :confirm="t('modal.close_unsaved_tab')"
-      :title="t('confirm.save_unsaved_tab')"
-      @hide-modal="onCloseConfirmSaveTab"
-      @resolve="onResolveConfirmSaveTab"
-    />
-    <HoppSmartConfirmModal
       :show="confirmingCloseAllTabs"
       :confirm="t('modal.close_unsaved_tab')"
       :title="t('confirm.close_unsaved_tabs', { count: unsavedTabsCount })"
       @hide-modal="confirmingCloseAllTabs = false"
       @resolve="onResolveConfirmCloseAllTabs"
     />
+    <HoppSmartModal
+      v-if="confirmingCloseForTabID !== null"
+      dialog
+      role="dialog"
+      aria-modal="true"
+      :title="t('modal.close_unsaved_tab')"
+      @close="confirmingCloseForTabID = null"
+    >
+      <template #body>
+        <div class="text-center">
+          {{ t("confirm.save_unsaved_tab") }}
+        </div>
+      </template>
+      <template #footer>
+        <span class="flex space-x-2">
+          <HoppButtonPrimary
+            v-focus
+            :label="t?.('action.yes')"
+            outline
+            @click="onResolveConfirmSaveTab"
+          />
+          <HoppButtonSecondary
+            :label="t?.('action.no')"
+            filled
+            outline
+            @click="onCloseConfirmSaveTab"
+          />
+        </span>
+      </template>
+    </HoppSmartModal>
     <CollectionsSaveRequest
       v-if="savingRequest"
       mode="rest"
@@ -94,31 +118,15 @@
 </template>
 
 <script lang="ts" setup>
-import { ref, onMounted, onBeforeUnmount } from "vue"
+import { ref, onMounted } from "vue"
 import { safelyExtractRESTRequest } from "@hoppscotch/data"
 import { translateExtURLParams } from "~/helpers/RESTExtURLParams"
 import { useRoute } from "vue-router"
 import { useI18n } from "@composables/i18n"
 import { getDefaultRESTRequest } from "~/helpers/rest/default"
 import { defineActionHandler, invokeAction } from "~/helpers/actions"
-import { onLoggedIn } from "~/composables/auth"
 import { platform } from "~/platform"
-import {
-  audit,
-  BehaviorSubject,
-  combineLatest,
-  EMPTY,
-  from,
-  map,
-  Subscription,
-} from "rxjs"
-import { useToast } from "~/composables/toast"
-import { watchDebounced } from "@vueuse/core"
 import { useReadonlyStream } from "~/composables/stream"
-import {
-  changeCurrentSyncStatus,
-  currentSyncingStatus$,
-} from "~/newstore/syncing"
 import { useService } from "dioc/vue"
 import { InspectionService } from "~/services/inspection"
 import { HeaderInspectorService } from "~/services/inspection/inspectors/header.inspector"
@@ -126,7 +134,7 @@ import { EnvironmentInspectorService } from "~/services/inspection/inspectors/en
 import { ResponseInspectorService } from "~/services/inspection/inspectors/response.inspector"
 import { cloneDeep } from "lodash-es"
 import { RESTTabService } from "~/services/tab/rest"
-import { HoppTab, PersistableTabState } from "~/services/tab"
+import { HoppTab } from "~/services/tab"
 import { HoppRESTDocument } from "~/helpers/rest/document"
 
 const savingRequest = ref(false)
@@ -139,11 +147,15 @@ const exceptedTabID = ref<string | null>(null)
 const renameTabID = ref<string | null>(null)
 
 const t = useI18n()
-const toast = useToast()
 
 const tabs = useService(RESTTabService)
 
 const currentTabID = tabs.currentTabID
+
+const currentUser = useReadonlyStream(
+  platform.auth.getCurrentUserStream(),
+  platform.auth.getCurrentUser()
+)
 
 type PopupDetails = {
   show: boolean
@@ -164,12 +176,6 @@ const contextMenu = ref<PopupDetails>({
 })
 
 const activeTabs = tabs.getActiveTabs()
-
-const confirmSync = useReadonlyStream(currentSyncingStatus$, {
-  isInitialSync: false,
-  shouldSync: true,
-})
-const tabStateForSync = ref<PersistableTabState<HoppRESTDocument> | null>(null)
 
 function bindRequestToURLParams() {
   const route = useRoute()
@@ -308,109 +314,17 @@ const onSaveModalClose = () => {
   }
 }
 
-const syncTabState = () => {
-  if (tabStateForSync.value)
-    tabs.loadTabsFromPersistedState(tabStateForSync.value)
-}
-
-/**
- * Performs sync of the REST Tab session with Firestore.
- *
- * @returns A subscription to the sync observable stream.
- * Unsubscribe to stop syncing.
- */
-function startTabStateSync(): Subscription {
-  const currentUser$ = platform.auth.getCurrentUserStream()
-  const tabState$ =
-    new BehaviorSubject<PersistableTabState<HoppRESTDocument> | null>(null)
-
-  watchDebounced(
-    tabs.persistableTabState,
-    (state) => {
-      tabState$.next(state)
-    },
-    { debounce: 500, deep: true }
-  )
-
-  const sub = combineLatest([currentUser$, tabState$])
-    .pipe(
-      map(([user, tabState]) =>
-        user && tabState
-          ? from(platform.sync.tabState.writeCurrentTabState(user, tabState))
-          : EMPTY
-      ),
-      audit((x) => x)
-    )
-    .subscribe(() => {
-      // NOTE: This subscription should be kept
-    })
-
-  return sub
-}
-
-const showSyncToast = () => {
-  toast.show(t("confirm.sync"), {
-    duration: 0,
-    action: [
-      {
-        text: `${t("action.yes")}`,
-        onClick: (_, toastObject) => {
-          syncTabState()
-          changeCurrentSyncStatus({
-            isInitialSync: true,
-            shouldSync: true,
-          })
-          toastObject.goAway(0)
-        },
-      },
-      {
-        text: `${t("action.no")}`,
-        onClick: (_, toastObject) => {
-          changeCurrentSyncStatus({
-            isInitialSync: true,
-            shouldSync: false,
-          })
-          toastObject.goAway(0)
-        },
-      },
-    ],
-  })
-}
-
-function setupTabStateSync() {
-  const route = useRoute()
-
-  // Subscription to request sync
-  let sub: Subscription | null = null
-
-  // Load request on login resolve and start sync
-  onLoggedIn(async () => {
-    if (
-      Object.keys(route.query).length === 0 &&
-      !(route.query.code || route.query.error)
-    ) {
-      const tabStateFromSync =
-        await platform.sync.tabState.loadTabStateFromSync()
-
-      if (tabStateFromSync && !confirmSync.value.isInitialSync) {
-        tabStateForSync.value = tabStateFromSync
-        showSyncToast()
-        // Have to set isInitialSync to true here because the toast is shown
-        // and the user does not click on any of the actions
-        changeCurrentSyncStatus({
-          isInitialSync: true,
-          shouldSync: false,
-        })
-      }
+const shareTabRequest = (tabID: string) => {
+  const tab = tabs.getTabRef(tabID)
+  if (tab.value) {
+    if (currentUser.value) {
+      invokeAction("share.request", {
+        request: tab.value.document.request,
+      })
+    } else {
+      invokeAction("modals.login.toggle")
     }
-
-    sub = startTabStateSync()
-  })
-
-  // Stop subscription to stop syncing
-  onBeforeUnmount(() => {
-    sub?.unsubscribe()
-  })
+  }
 }
 
 defineActionHandler("contextmenu.open", ({ position, text }) => {
@@ -429,7 +343,6 @@ defineActionHandler("contextmenu.open", ({ position, text }) => {
   }
 })
 
-setupTabStateSync()
 bindRequestToURLParams()
 
 defineActionHandler("rest.request.open", ({ doc }) => {

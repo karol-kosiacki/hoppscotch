@@ -1,4 +1,4 @@
-import { ExecutionContext } from '@nestjs/common';
+import { ExecutionContext, HttpException } from '@nestjs/common';
 import { Reflector } from '@nestjs/core';
 import { GqlExecutionContext } from '@nestjs/graphql';
 import { pipe } from 'fp-ts/lib/function';
@@ -16,6 +16,7 @@ import {
   JSON_INVALID,
 } from './errors';
 import { AuthProvider } from './auth/helper';
+import { RESTError } from './types/RESTError';
 
 /**
  * A workaround to throw an exception in an expression.
@@ -25,6 +26,15 @@ import { AuthProvider } from './auth/helper';
  */
 export function throwErr(errMessage: string): never {
   throw new Error(errMessage);
+}
+
+/**
+ * This function allows throw to be used as an expression
+ * @param errMessage Message present in the error message
+ */
+export function throwHTTPErr(errorData: RESTError): never {
+  const { message, statusCode } = errorData;
+  throw new HttpException(message, statusCode);
 }
 
 /**
@@ -131,6 +141,58 @@ export const validateEmail = (email: string) => {
   ).test(email);
 };
 
+// Regular expressions for supported address object formats by nodemailer
+// check out for more info https://nodemailer.com/message/addresses
+const emailRegex1 = /^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$/;
+const emailRegex2 =
+  /^[\w\s]* <([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>$/;
+const emailRegex3 =
+  /^"[\w\s]+" <([a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,})>$/;
+
+/**
+ * Checks to see if the SMTP email is valid or not
+ * @param email
+ * @returns A Boolean depending on the format of the email
+ */
+export const validateSMTPEmail = (email: string) => {
+  // Check if the input matches any of the formats
+  return (
+    emailRegex1.test(email) ||
+    emailRegex2.test(email) ||
+    emailRegex3.test(email)
+  );
+};
+
+/**
+ * Checks to see if the URL is valid or not
+ * @param url The URL to validate
+ * @returns boolean
+ */
+export const validateSMTPUrl = (url: string) => {
+  // Possible valid formats
+  // smtp(s)://mail.example.com
+  // smtp(s)://user:pass@mail.example.com
+  // smtp(s)://mail.example.com:587
+  // smtp(s)://user:pass@mail.example.com:587
+
+  if (!url || url.length === 0) return false;
+
+  const regex =
+    /^(smtp|smtps):\/\/(?:([^:]+):([^@]+)@)?((?!\.)[^:]+)(?::(\d+))?$/;
+  if (regex.test(url)) return true;
+  return false;
+};
+
+/**
+ * Checks to see if the URL is valid or not
+ * @param url The URL to validate
+ * @returns boolean
+ */
+export const validateUrl = (url: string) => {
+  const urlRegex = /^(http|https):\/\/[^ "]+$/;
+  return urlRegex.test(url);
+};
+
 /**
  * String to JSON parser
  * @param {str} str The string to parse
@@ -161,21 +223,23 @@ export function isValidLength(title: string, length: number) {
 
 /**
  * This function is called by bootstrap() in main.ts
- *  It checks if the "VITE_ALLOWED_AUTH_PROVIDERS" environment variable is properly set or not.
+ * It checks if the "VITE_ALLOWED_AUTH_PROVIDERS" environment variable is properly set or not.
  * If not, it throws an error.
  */
-export function checkEnvironmentAuthProvider() {
-  if (!process.env.hasOwnProperty('VITE_ALLOWED_AUTH_PROVIDERS')) {
+export function checkEnvironmentAuthProvider(
+  VITE_ALLOWED_AUTH_PROVIDERS: string,
+) {
+  if (!VITE_ALLOWED_AUTH_PROVIDERS) {
     throw new Error(ENV_NOT_FOUND_KEY_AUTH_PROVIDERS);
   }
 
-  if (process.env.VITE_ALLOWED_AUTH_PROVIDERS === '') {
+  if (VITE_ALLOWED_AUTH_PROVIDERS === '') {
     throw new Error(ENV_EMPTY_AUTH_PROVIDERS);
   }
 
-  const givenAuthProviders = process.env.VITE_ALLOWED_AUTH_PROVIDERS.split(
-    ',',
-  ).map((provider) => provider.toLocaleUpperCase());
+  const givenAuthProviders = VITE_ALLOWED_AUTH_PROVIDERS.split(',').map(
+    (provider) => provider.toLocaleUpperCase(),
+  );
   const supportedAuthProviders = Object.values(AuthProvider).map(
     (provider: string) => provider.toLocaleUpperCase(),
   );
@@ -185,4 +249,40 @@ export function checkEnvironmentAuthProvider() {
       throw new Error(ENV_NOT_SUPPORT_AUTH_PROVIDERS);
     }
   }
+}
+
+/**
+ * Adds escape backslashes to the input so that it can be used inside
+ * SQL LIKE/ILIKE queries. Inspired by PHP's `mysql_real_escape_string`
+ * function.
+ *
+ * Eg. "100%" -> "100\\%"
+ *
+ * Source: https://stackoverflow.com/a/32648526
+ */
+export function escapeSqlLikeString(str: string) {
+  if (typeof str != 'string') return str;
+
+  return str.replace(/[\0\x08\x09\x1a\n\r"'\\\%]/g, function (char) {
+    switch (char) {
+      case '\0':
+        return '\\0';
+      case '\x08':
+        return '\\b';
+      case '\x09':
+        return '\\t';
+      case '\x1a':
+        return '\\z';
+      case '\n':
+        return '\\n';
+      case '\r':
+        return '\\r';
+      case '"':
+      case "'":
+      case '\\':
+      case '%':
+        return '\\' + char; // prepends a backslash to backslash, percent,
+      // and double/single quotes
+    }
+  });
 }

@@ -1,14 +1,14 @@
 <template>
   <div
-    class="flex flex-col flex-1 border rounded border-divider"
+    class="flex flex-1 flex-col rounded border border-divider"
     @contextmenu.prevent="!compact ? options.tippy.show() : null"
   >
     <div
-      class="flex items-start flex-1"
+      class="flex flex-1 items-start"
       :class="
         compact
           ? team.myRole === 'OWNER'
-            ? 'cursor-pointer hover:bg-primaryDark transition hover:border-dividerDark focus-visible:border-dividerDark'
+            ? 'cursor-pointer transition hover:border-dividerDark hover:bg-primaryDark focus-visible:border-dividerDark'
             : 'cursor-not-allowed bg-primaryLight'
           : ''
       "
@@ -20,7 +20,7 @@
           : ''
       "
     >
-      <div class="p-4">
+      <div class="p-4 truncate">
         <label
           class="font-semibold text-secondaryDark"
           :class="{ 'cursor-pointer': compact && team.myRole === 'OWNER' }"
@@ -30,7 +30,7 @@
         <TeamsMemberStack :team-members="team.teamMembers" class="mt-4" />
       </div>
     </div>
-    <div v-if="!compact" class="flex items-end justify-between flex-shrink-0">
+    <div v-if="!compact" class="flex flex-shrink-0 items-end justify-between">
       <span>
         <HoppButtonSecondary
           v-if="team.myRole === 'OWNER'"
@@ -131,6 +131,7 @@
     <HoppSmartConfirmModal
       :show="confirmRemove"
       :title="t('confirm.remove_team')"
+      :loading-state="loading"
       @hide-modal="confirmRemove = false"
       @resolve="deleteTeam()"
     />
@@ -161,6 +162,8 @@ import IconMoreVertical from "~icons/lucide/more-vertical"
 import IconUserX from "~icons/lucide/user-x"
 import IconUserPlus from "~icons/lucide/user-plus"
 import IconTrash2 from "~icons/lucide/trash-2"
+import { useService } from "dioc/vue"
+import { WorkspaceService } from "~/services/workspace.service"
 
 const t = useI18n()
 
@@ -173,6 +176,7 @@ const props = defineProps<{
 const emit = defineEmits<{
   (e: "edit-team"): void
   (e: "invite-team"): void
+  (e: "refetch-teams"): void
 }>()
 
 const toast = useToast()
@@ -180,7 +184,12 @@ const toast = useToast()
 const confirmRemove = ref(false)
 const confirmExit = ref(false)
 
+const loading = ref(false)
+
+const workspaceService = useService(WorkspaceService)
+
 const deleteTeam = () => {
+  loading.value = true
   pipe(
     backendDeleteTeam(props.teamID),
     TE.match(
@@ -188,9 +197,25 @@ const deleteTeam = () => {
         // TODO: Better errors ? We know the possible errors now
         toast.error(`${t("error.something_went_wrong")}`)
         console.error(err)
+        loading.value = false
+        confirmRemove.value = false
       },
       () => {
         toast.success(`${t("team.deleted")}`)
+        loading.value = false
+        emit("refetch-teams")
+
+        const currentWorkspace = workspaceService.currentWorkspace.value
+
+        // If the current workspace is the deleted workspace, change the workspace to personal
+        if (
+          currentWorkspace.type === "team" &&
+          currentWorkspace.teamID === props.teamID
+        ) {
+          workspaceService.changeWorkspace({ type: "personal" })
+        }
+
+        confirmRemove.value = false
       }
     )
   )() // Tasks (and TEs) are lazy, so call the function returned

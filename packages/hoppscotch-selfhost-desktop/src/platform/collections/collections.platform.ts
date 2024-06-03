@@ -101,7 +101,7 @@ type ExportedUserCollectionGQL = {
 function exportedCollectionToHoppCollection(
   collection: ExportedUserCollectionREST | ExportedUserCollectionGQL,
   collectionType: "REST" | "GQL"
-): HoppCollection<HoppRESTRequest | HoppGQLRequest> {
+): HoppCollection {
   if (collectionType == "REST") {
     const restCollection = collection as ExportedUserCollectionREST
 
@@ -112,10 +112,15 @@ function exportedCollectionToHoppCollection(
       folders: restCollection.folders.map((folder) =>
         exportedCollectionToHoppCollection(folder, collectionType)
       ),
-      requests: restCollection.requests.map(
-        ({
-          id,
+      requests: restCollection.requests.map((request) => {
+        const requestParsedResult = HoppRESTRequest.safeParse(request)
+        if (requestParsedResult.type === "ok") {
+          return requestParsedResult.value
+        }
+
+        const {
           v,
+          id,
           auth,
           body,
           endpoint,
@@ -125,20 +130,23 @@ function exportedCollectionToHoppCollection(
           params,
           preRequestScript,
           testScript,
-        }) => ({
-          id,
+          requestVariables,
+        } = request
+        return {
           v,
-          auth,
-          body,
-          endpoint,
-          headers,
-          method,
+          id,
           name,
+          endpoint,
+          method,
           params,
+          requestVariables: requestVariables,
+          auth,
+          headers,
+          body,
           preRequestScript,
           testScript,
-        })
-      ),
+        }
+      }),
     }
   } else {
     const gqlCollection = collection as ExportedUserCollectionGQL
@@ -186,7 +194,7 @@ async function loadUserCollections(collectionType: "REST" | "GQL") {
                 exportedCollectionToHoppCollection(
                   collection,
                   "REST"
-                ) as HoppCollection<HoppRESTRequest>
+                ) as HoppCollection
             )
           )
         : setGraphqlCollections(
@@ -195,7 +203,7 @@ async function loadUserCollections(collectionType: "REST" | "GQL") {
                 exportedCollectionToHoppCollection(
                   collection,
                   "GQL"
-                ) as HoppCollection<HoppGQLRequest>
+                ) as HoppCollection
             )
           )
     })
@@ -718,7 +726,7 @@ export const def: CollectionsPlatformDef = {
 
 function getCollectionPathFromCollectionID(
   collectionID: string,
-  collections: HoppCollection<HoppRESTRequest | HoppGQLRequest>[],
+  collections: HoppCollection[],
   parentPath?: string
 ): string | null {
   for (const collectionIndex in collections) {
@@ -742,7 +750,7 @@ function getCollectionPathFromCollectionID(
 
 function getRequestPathFromRequestID(
   requestID: string,
-  collections: HoppCollection<HoppRESTRequest | HoppGQLRequest>[],
+  collections: HoppCollection[],
   parentPath?: string
 ): { collectionPath: string; requestIndex: number } | null {
   for (const collectionIndex in collections) {
@@ -774,7 +782,7 @@ function getRequestPathFromRequestID(
 function getRequestIndex(
   requestID: string,
   parentCollectionPath: string,
-  collections: HoppCollection<HoppRESTRequest | HoppGQLRequest>[]
+  collections: HoppCollection[]
 ) {
   const collection = navigateToFolderWithIndexPath(
     collections,

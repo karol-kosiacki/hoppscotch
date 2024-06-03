@@ -18,11 +18,12 @@ import {
   HoppRESTParam,
   parseRawKeyValueEntriesE,
   parseTemplateStringE,
+  HoppRESTAuth,
+  HoppRESTHeaders,
 } from "@hoppscotch/data"
 import { arrayFlatMap, arraySort } from "../functional/array"
 import { toFormData } from "../functional/formData"
 import { tupleWithSameKeysToRecord } from "../functional/record"
-import { getGlobalVariables } from "~/newstore/environments"
 
 export interface EffectiveHoppRESTRequest extends HoppRESTRequest {
   /**
@@ -34,6 +35,7 @@ export interface EffectiveHoppRESTRequest extends HoppRESTRequest {
   effectiveFinalHeaders: { key: string; value: string }[]
   effectiveFinalParams: { key: string; value: string }[]
   effectiveFinalBody: FormData | string | null
+  effectiveFinalRequestVariables: { key: string; value: string }[]
 }
 
 /**
@@ -42,22 +44,36 @@ export interface EffectiveHoppRESTRequest extends HoppRESTRequest {
  * @param envVars Currently active environment variables
  * @returns The list of headers
  */
-const getComputedAuthHeaders = (
-  req: HoppRESTRequest,
-  envVars: Environment["variables"]
+export const getComputedAuthHeaders = (
+  envVars: Environment["variables"],
+  req?:
+    | HoppRESTRequest
+    | {
+        auth: HoppRESTAuth
+        headers: HoppRESTHeaders
+      },
+  auth?: HoppRESTRequest["auth"],
+  parse = true
 ) => {
+  const request = auth ? { auth: auth ?? { authActive: false } } : req
   // If Authorization header is also being user-defined, that takes priority
-  if (req.headers.find((h) => h.key.toLowerCase() === "authorization"))
+  if (req && req.headers.find((h) => h.key.toLowerCase() === "authorization"))
     return []
 
-  if (!req.auth.authActive) return []
+  if (!request) return []
+
+  if (!request.auth || !request.auth.authActive) return []
 
   const headers: HoppRESTHeader[] = []
 
   // TODO: Support a better b64 implementation than btoa ?
-  if (req.auth.authType === "basic") {
-    const username = parseTemplateString(req.auth.username, envVars)
-    const password = parseTemplateString(req.auth.password, envVars)
+  if (request.auth.authType === "basic") {
+    const username = parse
+      ? parseTemplateString(request.auth.username, envVars)
+      : request.auth.username
+    const password = parse
+      ? parseTemplateString(request.auth.password, envVars)
+      : request.auth.password
 
     headers.push({
       active: true,
@@ -65,22 +81,28 @@ const getComputedAuthHeaders = (
       value: `Basic ${btoa(`${username}:${password}`)}`,
     })
   } else if (
-    req.auth.authType === "bearer" ||
-    req.auth.authType === "oauth-2"
+    request.auth.authType === "bearer" ||
+    (request.auth.authType === "oauth-2" && request.auth.addTo === "HEADERS")
   ) {
+    const token =
+      request.auth.authType === "bearer"
+        ? request.auth.token
+        : request.auth.grantTypeInfo.token
+
     headers.push({
       active: true,
       key: "Authorization",
-      value: `Bearer ${parseTemplateString(req.auth.token, envVars)}`,
+      value: `Bearer ${parse ? parseTemplateString(token, envVars) : token}`,
     })
-  } else if (req.auth.authType === "api-key") {
-    const { key, value, addTo } = req.auth
-
-    if (addTo === "Headers") {
+  } else if (request.auth.authType === "api-key") {
+    const { key, addTo } = request.auth
+    if (addTo === "HEADERS" && key) {
       headers.push({
         active: true,
         key: parseTemplateString(key, envVars),
-        value: parseTemplateString(value, envVars),
+        value: parse
+          ? parseTemplateString(request.auth.value ?? "", envVars)
+          : request.auth.value ?? "",
       })
     }
   }
@@ -94,7 +116,12 @@ const getComputedAuthHeaders = (
  * @returns The list of headers
  */
 export const getComputedBodyHeaders = (
-  req: HoppRESTRequest
+  req:
+    | HoppRESTRequest
+    | {
+        auth: HoppRESTAuth
+        headers: HoppRESTHeaders
+      }
 ): HoppRESTHeader[] => {
   // If a content-type is already defined, that will override this
   if (
@@ -104,8 +131,10 @@ export const getComputedBodyHeaders = (
   )
     return []
 
+  if (!("body" in req)) return []
+
   // Body should have a non-null content-type
-  if (req.body.contentType === null) return []
+  if (!req.body || req.body.contentType === null) return []
 
   return [
     {
@@ -129,18 +158,26 @@ export type ComputedHeader = {
  * @returns The headers that are generated along with the source of that header
  */
 export const getComputedHeaders = (
-  req: HoppRESTRequest,
-  envVars: Environment["variables"]
-): ComputedHeader[] => [
-  ...getComputedAuthHeaders(req, envVars).map((header) => ({
-    source: "auth" as const,
-    header,
-  })),
-  ...getComputedBodyHeaders(req).map((header) => ({
-    source: "body" as const,
-    header,
-  })),
-]
+  req:
+    | HoppRESTRequest
+    | {
+        auth: HoppRESTAuth
+        headers: HoppRESTHeaders
+      },
+  envVars: Environment["variables"],
+  parse = true
+): ComputedHeader[] => {
+  return [
+    ...getComputedAuthHeaders(envVars, req, undefined, parse).map((header) => ({
+      source: "auth" as const,
+      header,
+    })),
+    ...getComputedBodyHeaders(req).map((header) => ({
+      source: "body" as const,
+      header,
+    })),
+  ]
+}
 
 export type ComputedParam = {
   source: "auth"
@@ -160,17 +197,40 @@ export const getComputedParams = (
 ): ComputedParam[] => {
   // When this gets complex, its best to split this function off (like with getComputedHeaders)
   // API-key auth can be added to query params
-  if (!req.auth.authActive) return []
-  if (req.auth.authType !== "api-key") return []
-  if (req.auth.addTo !== "Query params") return []
+  if (!req.auth || !req.auth.authActive) {
+    return []
+  }
+
+  if (req.auth.authType !== "api-key" && req.auth.authType !== "oauth-2") {
+    return []
+  }
+
+  if (req.auth.addTo !== "QUERY_PARAMS") {
+    return []
+  }
+
+  if (req.auth.authType === "api-key") {
+    return [
+      {
+        source: "auth" as const,
+        param: {
+          active: true,
+          key: parseTemplateString(req.auth.key, envVars),
+          value: parseTemplateString(req.auth.value, envVars),
+        },
+      },
+    ]
+  }
+
+  const { grantTypeInfo } = req.auth
 
   return [
     {
       source: "auth",
       param: {
         active: true,
-        key: parseTemplateString(req.auth.key, envVars),
-        value: parseTemplateString(req.auth.value, envVars),
+        key: "access_token",
+        value: parseTemplateString(grantTypeInfo.token, envVars),
       },
     },
   ]
@@ -214,7 +274,7 @@ function getFinalBodyFromRequest(
 
   if (request.body.contentType === "application/x-www-form-urlencoded") {
     const parsedBodyRecord = pipe(
-      request.body.body,
+      request.body.body ?? "",
       parseRawKeyValueEntriesE,
       E.map(
         flow(
@@ -251,7 +311,7 @@ function getFinalBodyFromRequest(
 
   if (request.body.contentType === "multipart/form-data") {
     return pipe(
-      request.body.body,
+      request.body.body ?? [],
       A.filter((x) => (x.key !== "" || x.isFile) && x.active), // Remove empty keys
 
       // Sort files down
@@ -296,38 +356,53 @@ export function getEffectiveRESTRequest(
   request: HoppRESTRequest,
   environment: Environment
 ): EffectiveHoppRESTRequest {
-  const envVariables = [...environment.variables, ...getGlobalVariables()]
-
   const effectiveFinalHeaders = pipe(
-    getComputedHeaders(request, envVariables).map((h) => h.header),
+    getComputedHeaders(request, environment.variables).map((h) => h.header),
     A.concat(request.headers),
     A.filter((x) => x.active && x.key !== ""),
     A.map((x) => ({
       active: true,
-      key: parseTemplateString(x.key, envVariables),
-      value: parseTemplateString(x.value, envVariables),
+      key: parseTemplateString(x.key, environment.variables),
+      value: parseTemplateString(x.value, environment.variables),
     }))
   )
 
   const effectiveFinalParams = pipe(
-    getComputedParams(request, envVariables).map((p) => p.param),
+    getComputedParams(request, environment.variables).map((p) => p.param),
     A.concat(request.params),
     A.filter((x) => x.active && x.key !== ""),
     A.map((x) => ({
       active: true,
-      key: parseTemplateString(x.key, envVariables),
-      value: parseTemplateString(x.value, envVariables),
+      key: parseTemplateString(x.key, environment.variables),
+      value: parseTemplateString(x.value, environment.variables),
     }))
   )
 
-  const effectiveFinalBody = getFinalBodyFromRequest(request, envVariables)
+  const effectiveFinalRequestVariables = pipe(
+    request.requestVariables,
+    A.filter((x) => x.active && x.key !== ""),
+    A.map((x) => ({
+      active: true,
+      key: parseTemplateString(x.key, environment.variables),
+      value: parseTemplateString(x.value, environment.variables),
+    }))
+  )
+
+  const effectiveFinalBody = getFinalBodyFromRequest(
+    request,
+    environment.variables
+  )
 
   return {
     ...request,
-    effectiveFinalURL: parseTemplateString(request.endpoint, envVariables),
+    effectiveFinalURL: parseTemplateString(
+      request.endpoint,
+      environment.variables
+    ),
     effectiveFinalHeaders,
     effectiveFinalParams,
     effectiveFinalBody,
+    effectiveFinalRequestVariables,
   }
 }
 

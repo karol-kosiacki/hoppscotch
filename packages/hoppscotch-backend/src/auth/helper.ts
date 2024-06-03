@@ -1,11 +1,11 @@
 import { HttpException, HttpStatus } from '@nestjs/common';
 import { DateTime } from 'luxon';
-import { AuthError } from 'src/types/AuthError';
 import { AuthTokens } from 'src/types/AuthTokens';
 import { Response } from 'express';
 import * as cookie from 'cookie';
 import { AUTH_PROVIDER_NOT_SPECIFIED, COOKIES_NOT_FOUND } from 'src/errors';
 import { throwErr } from 'src/utils';
+import { ConfigService } from '@nestjs/config';
 
 enum AuthTokenType {
   ACCESS_TOKEN = 'access_token',
@@ -25,15 +25,6 @@ export enum AuthProvider {
 }
 
 /**
- * This function allows throw to be used as an expression
- * @param errMessage Message present in the error message
- */
-export function throwHTTPErr(errorData: AuthError): never {
-  const { message, statusCode } = errorData;
-  throw new HttpException(message, statusCode);
-}
-
-/**
  * Sets and returns the cookies in the response object on successful authentication
  * @param res Express Response Object
  * @param authTokens Object containing the access and refresh tokens
@@ -45,15 +36,17 @@ export const authCookieHandler = (
   redirect: boolean,
   redirectUrl: string | null,
 ) => {
+  const configService = new ConfigService();
+
   const currentTime = DateTime.now();
   const accessTokenValidity = currentTime
     .plus({
-      milliseconds: parseInt(process.env.ACCESS_TOKEN_VALIDITY),
+      milliseconds: parseInt(configService.get('ACCESS_TOKEN_VALIDITY')),
     })
     .toMillis();
   const refreshTokenValidity = currentTime
     .plus({
-      milliseconds: parseInt(process.env.REFRESH_TOKEN_VALIDITY),
+      milliseconds: parseInt(configService.get('REFRESH_TOKEN_VALIDITY')),
     })
     .toMillis();
 
@@ -75,10 +68,12 @@ export const authCookieHandler = (
   }
 
   // check to see if redirectUrl is a whitelisted url
-  const whitelistedOrigins = process.env.WHITELISTED_ORIGINS.split(',');
+  const whitelistedOrigins = configService
+    .get('WHITELISTED_ORIGINS')
+    .split(',');
   if (!whitelistedOrigins.includes(redirectUrl))
     // if it is not redirect by default to REDIRECT_URL
-    redirectUrl = process.env.REDIRECT_URL;
+    redirectUrl = configService.get('REDIRECT_URL');
 
   return res.status(HttpStatus.OK).redirect(redirectUrl);
 };
@@ -112,13 +107,16 @@ export const subscriptionContextCookieParser = (rawCookies: string) => {
  * @param provider Provider we want to check the presence of
  * @returns Boolean if provider specified is present or not
  */
-export function authProviderCheck(provider: string) {
+export function authProviderCheck(
+  provider: string,
+  VITE_ALLOWED_AUTH_PROVIDERS: string,
+) {
   if (!provider) {
     throwErr(AUTH_PROVIDER_NOT_SPECIFIED);
   }
 
-  const envVariables = process.env.VITE_ALLOWED_AUTH_PROVIDERS
-    ? process.env.VITE_ALLOWED_AUTH_PROVIDERS.split(',').map((provider) =>
+  const envVariables = VITE_ALLOWED_AUTH_PROVIDERS
+    ? VITE_ALLOWED_AUTH_PROVIDERS.split(',').map((provider) =>
         provider.trim().toUpperCase(),
       )
     : [];

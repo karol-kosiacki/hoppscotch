@@ -1,9 +1,10 @@
-import { pluck, distinctUntilChanged } from "rxjs/operators"
 import { cloneDeep, defaultsDeep, has } from "lodash-es"
 import { Observable } from "rxjs"
-
-import DispatchingStore, { defineDispatchers } from "./DispatchingStore"
+import { distinctUntilChanged, pluck } from "rxjs/operators"
+import { nextTick } from "vue"
+import { platform } from "~/platform"
 import type { KeysMatching } from "~/types/ts-utils"
+import DispatchingStore, { defineDispatchers } from "./DispatchingStore"
 
 export const HoppBgColors = ["system", "light", "dark", "black"] as const
 
@@ -30,6 +31,25 @@ export type SettingsDef = {
 
   PROXY_URL: string
 
+  WRAP_LINES: {
+    httpRequestBody: boolean
+    httpResponseBody: boolean
+    httpHeaders: boolean
+    httpParams: boolean
+    httpUrlEncoded: boolean
+    httpPreRequest: boolean
+    httpTest: boolean
+    httpRequestVariables: boolean
+    graphqlQuery: boolean
+    graphqlResponseBody: boolean
+    graphqlHeaders: boolean
+    graphqlVariables: boolean
+    graphqlSchema: boolean
+    importCurl: boolean
+    codeGen: boolean
+    cookie: boolean
+  }
+
   CURRENT_INTERCEPTOR_ID: string
 
   URL_EXCLUDES: {
@@ -46,32 +66,67 @@ export type SettingsDef = {
   SIDEBAR: boolean
   SIDEBAR_ON_LEFT: boolean
   COLUMN_LAYOUT: boolean
+
+  HAS_OPENED_SPOTLIGHT: boolean
 }
 
-export const getDefaultSettings = (): SettingsDef => ({
-  syncCollections: true,
-  syncHistory: true,
-  syncEnvironments: true,
+export const getDefaultSettings = (): SettingsDef => {
+  const defaultSettings: SettingsDef = {
+    syncCollections: true,
+    syncHistory: true,
+    syncEnvironments: true,
 
-  CURRENT_INTERCEPTOR_ID: "browser", // TODO: Allow the platform definition to take this place
+    WRAP_LINES: {
+      httpRequestBody: true,
+      httpResponseBody: true,
+      httpHeaders: true,
+      httpParams: true,
+      httpUrlEncoded: true,
+      httpPreRequest: true,
+      httpTest: true,
+      httpRequestVariables: true,
+      graphqlQuery: true,
+      graphqlResponseBody: true,
+      graphqlHeaders: false,
+      graphqlVariables: false,
+      graphqlSchema: true,
+      importCurl: true,
+      codeGen: true,
+      cookie: true,
+    },
 
-  // TODO: Interceptor related settings should move under the interceptor systems
-  PROXY_URL: "https://proxy.hoppscotch.io/",
-  URL_EXCLUDES: {
-    auth: true,
-    httpUser: true,
-    httpPassword: true,
-    bearerToken: true,
-    oauth2Token: true,
-  },
-  THEME_COLOR: "indigo",
-  BG_COLOR: "system",
-  TELEMETRY_ENABLED: true,
-  EXPAND_NAVIGATION: true,
-  SIDEBAR: true,
-  SIDEBAR_ON_LEFT: true,
-  COLUMN_LAYOUT: true,
-})
+    CURRENT_INTERCEPTOR_ID: "",
+
+    // TODO: Interceptor related settings should move under the interceptor systems
+    PROXY_URL: "https://proxy.hoppscotch.io/",
+    URL_EXCLUDES: {
+      auth: true,
+      httpUser: true,
+      httpPassword: true,
+      bearerToken: true,
+      oauth2Token: true,
+    },
+    THEME_COLOR: "indigo",
+    BG_COLOR: "system",
+    TELEMETRY_ENABLED: true,
+    EXPAND_NAVIGATION: false,
+    SIDEBAR: true,
+    SIDEBAR_ON_LEFT: false,
+    COLUMN_LAYOUT: true,
+
+    HAS_OPENED_SPOTLIGHT: false,
+  }
+
+  // Wait for platform to initialize before setting CURRENT_INTERCEPTOR_ID
+  nextTick(() => {
+    applySetting(
+      "CURRENT_INTERCEPTOR_ID",
+      platform?.interceptors.default || "browser"
+    )
+  })
+
+  return defaultSettings
+}
 
 type ApplySettingPayload = {
   [K in keyof SettingsDef]: {
@@ -79,6 +134,16 @@ type ApplySettingPayload = {
     value: SettingsDef[K]
   }
 }[keyof SettingsDef]
+
+type ApplyNestedSettingPayload = {
+  [K in KeysMatching<SettingsDef, Record<string, any>>]: {
+    [P in keyof SettingsDef[K]]: {
+      settingKey: K
+      property: P
+      value: SettingsDef[K][P]
+    }
+  }[keyof SettingsDef[K]]
+}[KeysMatching<SettingsDef, Record<string, any>>]
 
 const dispatchers = defineDispatchers({
   bulkApplySettings(_currentState: SettingsDef, payload: Partial<SettingsDef>) {
@@ -100,12 +165,47 @@ const dispatchers = defineDispatchers({
 
     return result
   },
+  toggleNestedSetting(
+    currentState: SettingsDef,
+    {
+      settingKey,
+      property,
+    }: {
+      settingKey: KeysMatching<SettingsDef, Record<string, boolean>>
+      property: KeysMatching<SettingsDef[typeof settingKey], boolean>
+    }
+  ) {
+    if (!has(currentState, [settingKey, property])) {
+      return {}
+    }
+
+    const result: Partial<SettingsDef> = {
+      [settingKey]: {
+        ...currentState[settingKey],
+        [property]: !currentState[settingKey][property],
+      },
+    }
+
+    return result
+  },
   applySetting(
     _currentState: SettingsDef,
     { settingKey, value }: ApplySettingPayload
   ) {
     const result: Partial<SettingsDef> = {
       [settingKey]: value,
+    }
+
+    return result
+  },
+  applyNestedSetting(
+    _currentState: SettingsDef,
+    { settingKey, property, value }: ApplyNestedSettingPayload
+  ) {
+    const result: Partial<SettingsDef> = {
+      [settingKey]: {
+        [property]: value,
+      },
     }
 
     return result
@@ -144,6 +244,20 @@ export function toggleSetting(settingKey: KeysMatching<SettingsDef, boolean>) {
   })
 }
 
+export function toggleNestedSetting<
+  K extends KeysMatching<SettingsDef, Record<string, boolean>>,
+  P extends keyof SettingsDef[K],
+>(settingKey: K, property: P) {
+  settingsStore.dispatch({
+    dispatcher: "toggleNestedSetting",
+    payload: {
+      settingKey,
+      // @ts-expect-error TS is not able to understand the type semantics here
+      property,
+    },
+  })
+}
+
 export function applySetting<K extends keyof SettingsDef>(
   settingKey: K,
   value: SettingsDef[K]
@@ -154,6 +268,22 @@ export function applySetting<K extends keyof SettingsDef>(
       // @ts-expect-error TS is not able to understand the type semantics here
       settingKey,
       // @ts-expect-error TS is not able to understand the type semantics here
+      value,
+    },
+  })
+}
+
+export function applyNestedSetting<
+  K extends KeysMatching<SettingsDef, Record<string, any>>,
+  P extends keyof SettingsDef[K],
+  R extends SettingsDef[K][P],
+>(settingKey: K, property: P, value: R) {
+  settingsStore.dispatch({
+    dispatcher: "applyNestedSetting",
+    payload: {
+      settingKey,
+      // @ts-expect-error TS is not able to understand the type semantics here
+      property,
       value,
     },
   })

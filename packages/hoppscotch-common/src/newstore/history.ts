@@ -167,7 +167,7 @@ const RESTHistoryDispatchers = defineDispatchers({
   removeDuplicateEntry(currentVal: RESTHistoryType, { id }: { id: string }) {
     const entries = currentVal.state.filter((e) => e.id === id)
 
-    if (entries.length == 2) {
+    if (entries.length === 2) {
       const indexToRemove = currentVal.state.findIndex((e) => e.id === id)
 
       currentVal.state.splice(indexToRemove, 1)
@@ -230,7 +230,7 @@ const GQLHistoryDispatchers = defineDispatchers({
   removeDuplicateEntry(currentVal: GraphqlHistoryType, { id }: { id: string }) {
     const entries = currentVal.state.filter((e) => e.id === id)
 
-    if (entries.length == 2) {
+    if (entries.length === 2) {
       const indexToRemove = currentVal.state.findIndex((e) => e.id === id)
 
       currentVal.state.splice(indexToRemove, 1)
@@ -353,6 +353,7 @@ executedResponses$.subscribe((res) => {
         params: res.req.params,
         preRequestScript: res.req.preRequestScript,
         testScript: res.req.testScript,
+        requestVariables: res.req.requestVariables,
         v: res.req.v,
       },
       responseMeta: {

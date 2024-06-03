@@ -10,10 +10,12 @@ import { Ref, computed, effectScope, markRaw, ref, watch } from "vue"
 import { getI18n } from "~/modules/i18n"
 import MiniSearch from "minisearch"
 import {
+  cascadeParentCollectionForHeaderAuth,
   graphqlCollectionStore,
   restCollectionStore,
 } from "~/newstore/collections"
 import IconFolder from "~icons/lucide/folder"
+import IconImport from "~icons/lucide/folder-down"
 import RESTRequestSpotlightEntry from "~/components/app/spotlight/entry/RESTRequest.vue"
 import GQLRequestSpotlightEntry from "~/components/app/spotlight/entry/GQLRequest.vue"
 import {
@@ -48,9 +50,7 @@ export class CollectionsSpotlightSearcherService
   private readonly spotlight = this.bind(SpotlightService)
   private readonly workspaceService = this.bind(WorkspaceService)
 
-  constructor() {
-    super()
-
+  override onServiceInit() {
     this.spotlight.registerSearcher(this)
   }
 
@@ -117,9 +117,8 @@ export class CollectionsSpotlightSearcherService
         return "graphql"
       } else if (url.pathname === "/") {
         return "rest"
-      } else {
-        return "other"
       }
+      return "other"
     } catch (e) {
       return "other"
     }
@@ -151,6 +150,10 @@ export class CollectionsSpotlightSearcherService
         id: `create-collection`,
         name: this.t("collection.new"),
       })
+      minisearch.add({
+        id: "import-collection",
+        name: this.t("collection.import"),
+      })
     }
 
     if (pageCategory === "rest") {
@@ -168,50 +171,57 @@ export class CollectionsSpotlightSearcherService
       text: this.t("collection.new"),
     }
 
+    const importCollectionText: SpotlightResultTextType<any> = {
+      type: "text",
+      text: this.t("collection.import_collection"),
+    }
+
     scopeHandle.run(() => {
+      const isPersonalWorkspace = computed(
+        () => this.workspaceService.currentWorkspace.value.type === "personal"
+      )
+
       watch(query, (query) => {
-        if (pageCategory === "other") {
+        if (!isPersonalWorkspace.value) {
           results.value = []
           return
         }
 
-        if (pageCategory === "rest") {
-          const searchResults = minisearch.search(query).slice(0, 10)
-
-          results.value = searchResults.map((result) => ({
-            id: result.id,
-            text:
-              result.id === "create-collection"
-                ? newCollectionText
-                : {
-                    type: "custom",
-                    component: markRaw(RESTRequestSpotlightEntry),
-                    componentProps: {
-                      folderPath: result.id.split("rest-")[1],
-                    },
-                  },
-            icon: markRaw(IconFolder),
-            score: result.score,
-          }))
-        } else if (pageCategory === "graphql") {
-          const searchResults = minisearch.search(query).slice(0, 10)
-
-          results.value = searchResults.map((result) => ({
-            id: result.id,
-            text:
-              result.id === "create-collection"
-                ? newCollectionText
-                : {
-                    type: "custom",
-                    component: markRaw(GQLRequestSpotlightEntry),
-                    componentProps: {
-                      folderPath: result.id.split("gql-")[1],
-                    },
-                  },
-            icon: markRaw(IconFolder),
-            score: result.score,
-          }))
+        if (pageCategory === "other") {
+          results.value = []
+          return
         }
+        const getResultText = (id: string): SpotlightResultTextType<any> => {
+          if (id === "create-collection") return newCollectionText
+          else if (id === "import-collection") return importCollectionText
+          return {
+            type: "custom",
+            component: markRaw(
+              pageCategory === "rest"
+                ? RESTRequestSpotlightEntry
+                : GQLRequestSpotlightEntry
+            ),
+            componentProps: {
+              folderPath: id.split(
+                pageCategory === "rest" ? "rest-" : "gql-"
+              )[1],
+            },
+          }
+        }
+
+        const getResultIcon = (id: string) => {
+          if (id === "import-collection") return markRaw(IconImport)
+          return markRaw(IconFolder)
+        }
+
+        const searchResults = minisearch.search(query).slice(0, 10)
+
+        results.value = searchResults.map((result) => ({
+          id: result.id,
+          text: getResultText(result.id),
+          icon: getResultIcon(result.id),
+          score: result.score,
+        }))
       })
     })
 
@@ -230,7 +240,7 @@ export class CollectionsSpotlightSearcherService
 
   private getRESTFolderFromFolderPath(
     folderPath: string
-  ): HoppCollection<HoppRESTRequest> | undefined {
+  ): HoppCollection | undefined {
     try {
       const folderIndicies = folderPath.split("/").map((x) => parseInt(x))
 
@@ -254,7 +264,7 @@ export class CollectionsSpotlightSearcherService
 
   private getGQLFolderFromFolderPath(
     folderPath: string
-  ): HoppCollection<HoppGQLRequest> | undefined {
+  ): HoppCollection | undefined {
     try {
       const folderIndicies = folderPath.split("/").map((x) => parseInt(x))
 
@@ -279,6 +289,9 @@ export class CollectionsSpotlightSearcherService
   public onResultSelect(result: SpotlightSearcherResult): void {
     if (result.id === "create-collection") return invokeAction("collection.new")
 
+    if (result.id === "import-collection")
+      return invokeAction(`modals.collection.import`)
+
     const [type, path] = result.id.split("-")
 
     if (type === "rest") {
@@ -301,9 +314,14 @@ export class CollectionsSpotlightSearcherService
         this.restTab.setActiveTab(possibleTab.value.id)
       } else {
         const req = this.getRESTFolderFromFolderPath(folderPath.join("/"))
-          ?.requests[reqIndex]
+          ?.requests[reqIndex] as HoppRESTRequest
 
         if (!req) return
+
+        const { auth, headers } = cascadeParentCollectionForHeaderAuth(
+          folderPath.join("/"),
+          "rest"
+        )
 
         this.restTab.createNewTab(
           {
@@ -314,6 +332,10 @@ export class CollectionsSpotlightSearcherService
               folderPath: folderPath.join("/"),
               requestIndex: reqIndex,
             },
+            inheritedProperties: {
+              auth,
+              headers,
+            },
           },
           true
         )
@@ -323,10 +345,14 @@ export class CollectionsSpotlightSearcherService
       const reqIndex = folderPath.pop()!
 
       const req = this.getGQLFolderFromFolderPath(folderPath.join("/"))
-        ?.requests[reqIndex]
+        ?.requests[reqIndex] as HoppGQLRequest
 
       if (!req) return
 
+      const { auth, headers } = cascadeParentCollectionForHeaderAuth(
+        folderPath.join("/"),
+        "graphql"
+      )
       this.gqlTab.createNewTab({
         saveContext: {
           originLocation: "user-collection",
@@ -335,6 +361,10 @@ export class CollectionsSpotlightSearcherService
         },
         request: req,
         isDirty: false,
+        inheritedProperties: {
+          auth,
+          headers,
+        },
       })
     }
   }

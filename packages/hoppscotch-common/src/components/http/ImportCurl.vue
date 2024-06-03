@@ -6,10 +6,10 @@
     @close="hideModal"
   >
     <template #body>
-      <div class="border rounded border-dividerLight">
+      <div class="rounded border border-dividerLight">
         <div class="flex flex-col">
           <div class="flex items-center justify-between pl-4">
-            <label class="font-semibold truncate text-secondaryLight">
+            <label class="truncate font-semibold text-secondaryLight">
               cURL
             </label>
             <div class="flex items-center">
@@ -22,9 +22,9 @@
               <HoppButtonSecondary
                 v-tippy="{ theme: 'tooltip' }"
                 :title="t('state.linewrap')"
-                :class="{ '!text-accent': linewrapEnabled }"
+                :class="{ '!text-accent': WRAP_LINES }"
                 :icon="IconWrapText"
-                @click.prevent="linewrapEnabled = !linewrapEnabled"
+                @click.prevent="toggleNestedSetting('WRAP_LINES', 'importCurl')"
               />
               <HoppButtonSecondary
                 v-tippy="{ theme: 'tooltip', allowHTML: true }"
@@ -43,7 +43,7 @@
           <div class="h-46">
             <div
               ref="curlEditor"
-              class="h-full border-t rounded-b border-dividerLight"
+              class="h-full rounded-b border-t border-dividerLight"
             ></div>
           </div>
         </div>
@@ -96,6 +96,9 @@ import IconTrash2 from "~icons/lucide/trash-2"
 import { platform } from "~/platform"
 import { RESTTabService } from "~/services/tab/rest"
 import { useService } from "dioc/vue"
+import { useNestedSetting } from "~/composables/settings"
+import { toggleNestedSetting } from "~/newstore/settings"
+import { EditorView } from "@codemirror/view"
 
 const t = useI18n()
 
@@ -106,7 +109,7 @@ const tabs = useService(RESTTabService)
 const curl = ref("")
 
 const curlEditor = ref<any | null>(null)
-const linewrapEnabled = ref(true)
+const WRAP_LINES = useNestedSetting("WRAP_LINES", "importCurl")
 
 const props = defineProps<{ show: boolean; text: string }>()
 
@@ -117,11 +120,12 @@ useCodemirror(
     extendedEditorConfig: {
       mode: "application/x-sh",
       placeholder: `${t("request.enter_curl")}`,
-      lineWrapping: linewrapEnabled,
+      lineWrapping: WRAP_LINES,
     },
     linter: null,
     completer: null,
     environmentHighlights: false,
+    onInit: (view: EditorView) => view.focus(),
   })
 )
 

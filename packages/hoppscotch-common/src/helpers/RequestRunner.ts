@@ -1,26 +1,19 @@
+import {
+  Environment,
+  HoppRESTHeaders,
+  HoppRESTRequestVariable,
+} from "@hoppscotch/data"
+import { SandboxTestResult, TestDescriptor } from "@hoppscotch/js-sandbox"
+import { runTestScript } from "@hoppscotch/js-sandbox/web"
+import * as A from "fp-ts/Array"
+import * as E from "fp-ts/Either"
+import * as O from "fp-ts/Option"
+import { flow, pipe } from "fp-ts/function"
+import { cloneDeep } from "lodash-es"
 import { Observable, Subject } from "rxjs"
 import { filter } from "rxjs/operators"
-import { flow, pipe } from "fp-ts/function"
-import * as O from "fp-ts/Option"
-import * as A from "fp-ts/Array"
-import { Environment } from "@hoppscotch/data"
-import {
-  SandboxTestResult,
-  runTestScript,
-  TestDescriptor,
-} from "@hoppscotch/js-sandbox"
-import * as E from "fp-ts/Either"
-import { cloneDeep } from "lodash-es"
-import {
-  getCombinedEnvVariables,
-  getFinalEnvsFromPreRequest,
-} from "./preRequest"
-import { getEffectiveRESTRequest } from "./utils/EffectiveURL"
-import { HoppRESTResponse } from "./types/HoppRESTResponse"
-import { createRESTNetworkRequestStream } from "./network"
-import { HoppTestData, HoppTestResult } from "./types/HoppTestResult"
-import { isJSONContentType } from "./utils/contenttypes"
-import { updateTeamEnvironment } from "./backend/mutations/TeamEnvironment"
+import { Ref } from "vue"
+
 import {
   environmentsStore,
   getCurrentEnvironment,
@@ -29,9 +22,25 @@ import {
   setGlobalEnvVariables,
   updateEnvironment,
 } from "~/newstore/environments"
-import { Ref } from "vue"
 import { HoppTab } from "~/services/tab"
+import { updateTeamEnvironment } from "./backend/mutations/TeamEnvironment"
+import { createRESTNetworkRequestStream } from "./network"
+import {
+  getCombinedEnvVariables,
+  getFinalEnvsFromPreRequest,
+} from "./preRequest"
 import { HoppRESTDocument } from "./rest/document"
+import { HoppRESTResponse } from "./types/HoppRESTResponse"
+import { HoppTestData, HoppTestResult } from "./types/HoppTestResult"
+import { getEffectiveRESTRequest } from "./utils/EffectiveURL"
+import { isJSONContentType } from "./utils/contenttypes"
+import {
+  SecretEnvironmentService,
+  SecretVariable,
+} from "~/services/secret-environment.service"
+import { getService } from "~/modules/dioc"
+
+const secretEnvironmentService = getService(SecretEnvironmentService)
 
 const getTestableBody = (
   res: HoppRESTResponse & { type: "success" | "fail" }
@@ -60,14 +69,101 @@ const getTestableBody = (
   return x
 }
 
-const combineEnvVariables = (env: {
-  global: Environment["variables"]
-  selected: Environment["variables"]
-}) => [...env.selected, ...env.global]
+const combineEnvVariables = (variables: {
+  environments: {
+    selected: Environment["variables"]
+    global: Environment["variables"]
+  }
+  requestVariables: Environment["variables"]
+}) => [
+  ...variables.requestVariables,
+  ...variables.environments.selected,
+  ...variables.environments.global,
+]
 
 export const executedResponses$ = new Subject<
   HoppRESTResponse & { type: "success" | "fail " }
 >()
+
+/**
+ * Used to update the environment schema with the secret variables
+ * and store the secret variable values in the secret environment service
+ * @param envs The environment variables to update
+ * @param type Whether the environment variables are global or selected
+ * @returns the updated environment variables
+ */
+const updateEnvironmentsWithSecret = (
+  envs: Environment["variables"] &
+    {
+      secret: true
+      value: string | undefined
+      key: string
+    }[],
+  type: "global" | "selected"
+) => {
+  const currentEnvID =
+    type === "selected" ? getCurrentEnvironment().id : "Global"
+
+  const updatedSecretEnvironments: SecretVariable[] = []
+
+  const updatedEnv = pipe(
+    envs,
+    A.mapWithIndex((index, e) => {
+      if (e.secret) {
+        updatedSecretEnvironments.push({
+          key: e.key,
+          value: e.value ?? "",
+          varIndex: index,
+        })
+
+        // delete the value from the environment
+        // so that it doesn't get saved in the environment
+        delete e.value
+        return e
+      }
+      return e
+    })
+  )
+  if (currentEnvID) {
+    secretEnvironmentService.addSecretEnvironment(
+      currentEnvID,
+      updatedSecretEnvironments
+    )
+  }
+  return updatedEnv
+}
+
+/**
+ * Transforms the environment list to a list with unique keys with value
+ * @param envs The environment list to be transformed
+ * @returns The transformed environment list with keys with value
+ */
+const filterNonEmptyEnvironmentVariables = (
+  envs: Environment["variables"]
+): Environment["variables"] => {
+  const envsMap = new Map<string, Environment["variables"][number]>()
+
+  envs.forEach((env) => {
+    if (env.secret) {
+      envsMap.set(env.key, env)
+    } else if (envsMap.has(env.key)) {
+      const existingEnv = envsMap.get(env.key)
+
+      if (
+        existingEnv &&
+        "value" in existingEnv &&
+        existingEnv.value === "" &&
+        env.value !== ""
+      ) {
+        envsMap.set(env.key, env)
+      }
+    } else {
+      envsMap.set(env.key, env)
+    }
+  })
+
+  return Array.from(envsMap.values())
+}
 
 export function runRESTRequest$(
   tab: Ref<HoppTab<HoppRESTDocument>>
@@ -90,7 +186,7 @@ export function runRESTRequest$(
     tab.value.document.request.preRequestScript,
     getCombinedEnvVariables(),
     tab.value.document.request.body.body
-  )().then((envs) => {
+  ).then((envs) => {
     if (cancelCalled) return E.left("cancellation" as const)
 
     if (E.isLeft(envs)) {
@@ -98,13 +194,66 @@ export function runRESTRequest$(
       return E.left("script_fail" as const)
     }
 
-    const effectiveRequest = getEffectiveRESTRequest(
-      tab.value.document.request,
-      {
-        name: "Env",
-        variables: combineEnvVariables(envs.right),
-      }
+    const requestAuth =
+      tab.value.document.request.auth.authType === "inherit" &&
+      tab.value.document.request.auth.authActive
+        ? tab.value.document.inheritedProperties?.auth.inheritedAuth
+        : tab.value.document.request.auth
+
+    let requestHeaders
+
+    const inheritedHeaders =
+      tab.value.document.inheritedProperties?.headers.map((header) => {
+        if (header.inheritedHeader) {
+          return header.inheritedHeader
+        }
+        return []
+      })
+
+    if (inheritedHeaders) {
+      requestHeaders = [
+        ...inheritedHeaders,
+        ...tab.value.document.request.headers,
+      ]
+    } else {
+      requestHeaders = [...tab.value.document.request.headers]
+    }
+
+    const finalRequestVariables =
+      tab.value.document.request.requestVariables.map(
+        (v: HoppRESTRequestVariable) => {
+          if (v.active) {
+            return {
+              key: v.key,
+              value: v.value,
+              secret: false,
+            }
+          }
+          return []
+        }
+      )
+
+    const finalRequest = {
+      ...tab.value.document.request,
+      auth: requestAuth ?? { authType: "none", authActive: false },
+      headers: requestHeaders as HoppRESTHeaders,
+    }
+
+    const finalEnvs = {
+      requestVariables: finalRequestVariables as Environment["variables"],
+      environments: envs.right,
+    }
+
+    const finalEnvsWithNonEmptyValues = filterNonEmptyEnvironmentVariables(
+      combineEnvVariables(finalEnvs)
     )
+
+    const effectiveRequest = getEffectiveRESTRequest(finalRequest, {
+      id: "env-id",
+      v: 1,
+      name: "Env",
+      variables: finalEnvsWithNonEmptyValues,
+    })
 
     const [stream, cancelRun] = createRESTNetworkRequestStream(effectiveRequest)
     cancelFunc = cancelRun
@@ -126,15 +275,39 @@ export function runRESTRequest$(
               body: getTestableBody(res),
               headers: res.headers,
             }
-          )()
+          )
 
           if (E.isRight(runResult)) {
-            tab.value.document.testResults = translateToSandboxTestResults(
-              runResult.right
+            const updatedGlobalEnvVariables = updateEnvironmentsWithSecret(
+              cloneDeep(runResult.right.envs.global),
+              "global"
             )
 
-            setGlobalEnvVariables(runResult.right.envs.global)
+            const updatedSelectedEnvVariables = updateEnvironmentsWithSecret(
+              cloneDeep(runResult.right.envs.selected),
+              "selected"
+            )
 
+            // set the response in the tab so that multiple tabs can run request simultaneously
+            tab.value.document.response = res
+
+            const updatedRunResult = {
+              ...runResult.right,
+              envs: {
+                global: updatedGlobalEnvVariables,
+                selected: updatedSelectedEnvVariables,
+              },
+            }
+
+            tab.value.document.testResults =
+              translateToSandboxTestResults(updatedRunResult)
+
+            setGlobalEnvVariables(
+              updateEnvironmentsWithSecret(
+                runResult.right.envs.global,
+                "global"
+              )
+            )
             if (
               environmentsStore.value.selectedEnvironmentIndex.type === "MY_ENV"
             ) {
@@ -145,8 +318,10 @@ export function runRESTRequest$(
               updateEnvironment(
                 environmentsStore.value.selectedEnvironmentIndex.index,
                 {
-                  ...env,
-                  variables: runResult.right.envs.selected,
+                  name: env.name,
+                  v: 1,
+                  id: env.id ?? "",
+                  variables: updatedRunResult.envs.selected,
                 }
               )
             } else if (
@@ -158,7 +333,7 @@ export function runRESTRequest$(
               })
               pipe(
                 updateTeamEnvironment(
-                  JSON.stringify(runResult.right.envs.selected),
+                  JSON.stringify(updatedRunResult.envs.selected),
                   environmentsStore.value.selectedEnvironmentIndex.teamEnvID,
                   env.name
                 )
@@ -247,7 +422,6 @@ function translateToSandboxTestResults(
 
   const globals = cloneDeep(getGlobalVariables())
   const env = getCurrentEnvironment()
-
   return {
     description: "",
     expectResults: testDesc.tests.expectResults,

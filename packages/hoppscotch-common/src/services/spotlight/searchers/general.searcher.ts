@@ -14,6 +14,8 @@ import IconGitHub from "~icons/lucide/github"
 import IconBook from "~icons/lucide/book"
 import IconLifeBuoy from "~icons/lucide/life-buoy"
 import IconZap from "~icons/lucide/zap"
+import { platform } from "~/platform"
+import { Container } from "dioc"
 
 type Doc = {
   text: string | string[]
@@ -88,15 +90,18 @@ export class GeneralSpotlightSearcherService extends StaticSpotlightSearcherServ
     },
   })
 
-  constructor() {
-    super({
+  // TODO: This is not recommended as of dioc > 3. Move to onServiceInit instead
+  constructor(c: Container) {
+    super(c, {
       searchFields: ["text", "alternates"],
       fieldWeights: {
         text: 2,
         alternates: 1,
       },
     })
+  }
 
+  override onServiceInit() {
     this.setDocuments(this.documents)
     this.spotlight.registerSearcher(this)
   }
@@ -113,7 +118,7 @@ export class GeneralSpotlightSearcherService extends StaticSpotlightSearcherServ
   }
 
   private openURL(url: string) {
-    window.open(url, "_blank")
+    platform.io.openExternalLink(url)
   }
 
   public onDocSelected(id: string): void {
