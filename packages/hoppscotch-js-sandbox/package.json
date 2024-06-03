@@ -55,9 +55,7 @@
     "@types/lodash-es": "4.17.12",
     "fp-ts": "2.12.1",
     "lodash": "4.17.21",
-    "lodash-es": "4.17.21",
-    "crypto-browserify": "^3.12.0",
-    "jsrsasign": "^10.6.1"
+    "lodash-es": "4.17.21"
   },
   "devDependencies": {
     "@digitak/esrun": "3.2.8",
