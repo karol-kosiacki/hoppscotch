@@ -1,0 +1,109 @@
+---
+# Source: accountant/templates/serviceaccount.yaml
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: hoppscotch
+  labels:
+    app.kubernetes.io/name: hoppscotch
+    app.kubernetes.io/instance: hoppscotch
+---
+# Source: accountant/templates/service.yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: hoppscotch
+  labels:
+    app.kubernetes.io/name: hoppscotch
+    app.kubernetes.io/instance: hoppscotch
+spec:
+  type: ClusterIP
+  ports:
+    - port: 80
+      targetPort: 9090
+      protocol: TCP
+      name: http
+  selector:
+    app.kubernetes.io/name: hoppscotch
+    app.kubernetes.io/instance: hoppscotch
+---
+# Source: accountant/templates/deployment.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: hoppscotch
+  labels:
+    app.kubernetes.io/name: hoppscotch
+    app.kubernetes.io/instance: hoppscotch
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: hoppscotch
+      app.kubernetes.io/instance: hoppscotch
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: hoppscotch
+        app.kubernetes.io/instance: hoppscotch
+    spec:
+      serviceAccountName: hoppscotch
+      containers:
+        - name: hoppscotch
+          securityContext:
+            allowPrivilegeEscalation: false
+            runAsUser: 1000
+            runAsGroup: 2000
+            capabilities:
+              drop:
+                - ALL
+            runAsNonRoot: true
+            seccompProfile:
+              type: RuntimeDefault
+          image: "652200462923.dkr.ecr.eu-west-1.amazonaws.com/tools/hoppscotch/hoppscotch-aio:2024.3.3"
+          imagePullPolicy: Always
+          ports:
+            - name: http
+              containerPort: 9090
+              protocol: TCP
+          resources:
+            limits:
+              memory: "400M"
+            requests:
+              memory: "400M"
+              cpu: "500m"
+          envFrom:
+            - secretRef:
+                name: hoppscotch
+          readinessProbe:
+            tcpSocket:
+              port: 9090
+            initialDelaySeconds: 15
+            periodSeconds: 10
+          livenessProbe:
+            tcpSocket:
+              port: 9090
+            initialDelaySeconds: 15
+            periodSeconds: 10
+---
+# Source: accountant/templates/ingress.yaml
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: hoppscotch
+  labels:
+    app.kubernetes.io/name: hoppscotch
+    app.kubernetes.io/instance: hoppscotch
+spec:
+  ingressClassName: "nginx"
+  rules:
+    - host: "hoppscotch.tools-dev.euw1.payhubpagonxt.pre.corp"
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: hoppscotch
+                port:
+                  number: 9090

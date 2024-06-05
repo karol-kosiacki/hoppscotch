@@ -80,5 +80,5 @@ export const getFinalEnvsFromPreRequest = (
     global: Environment["variables"]
     selected: Environment["variables"]
   }
-):  Promise<E.Either<string, TestResult["envs"]>> =>
+): Promise<E.Either<string, TestResult["envs"]>> =>
   runPreRequestScript(script, envs)

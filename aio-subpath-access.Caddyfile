@@ -10,7 +10,7 @@
 	reverse_proxy localhost:8080
 }
 
-:80 {
+:9090 {
 	# Serve the `selfhost-web` SPA by default
 	root * /site/selfhost-web
 	file_server

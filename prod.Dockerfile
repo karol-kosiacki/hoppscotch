@@ -73,15 +73,15 @@ COPY --from=sh_admin_builder /usr/src/app/packages/hoppscotch-sh-admin/dist-mult
 COPY --from=sh_admin_builder /usr/src/app/packages/hoppscotch-sh-admin/dist-subpath-access /site/sh-admin-subpath-access
 COPY aio-multiport-setup.Caddyfile /etc/caddy/aio-multiport-setup.Caddyfile
 COPY aio-subpath-access.Caddyfile /etc/caddy/aio-subpath-access.Caddyfile
+RUN chown -R 1000:2000 /site/
+RUN chown -R 1000:2000 /etc/caddy/
+RUN chown -R 1000:2000 /usr/src/app/
 ENTRYPOINT [ "tini", "--" ]
 RUN apk --no-cache add curl
 COPY --chmod=755 healthcheck.sh .
 HEALTHCHECK --interval=2s CMD /bin/sh ./healthcheck.sh
 CMD ["node", "/usr/src/app/aio_run.mjs"]
-EXPOSE 3170
-EXPOSE 3000
-EXPOSE 3100
-EXPOSE 80
+EXPOSE 9090
 
 
 
