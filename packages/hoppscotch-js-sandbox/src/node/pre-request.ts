@@ -30,7 +30,7 @@ export const runPreRequestScript = (
           async () => {
             const jail = context.global
 
-            const { pw, updatedEnvs } = getPreRequestScriptMethods(envs)
+            const { pw, updatedEnvs } = getPreRequestScriptMethods(envs,"")
 
             const serializedAPIMethods = getSerializedAPIMethods(pw)
             jail.setSync("serializedAPIMethods", serializedAPIMethods, {

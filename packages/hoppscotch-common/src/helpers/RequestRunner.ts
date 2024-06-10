@@ -184,7 +184,8 @@ export function runRESTRequest$(
 
   const res = getFinalEnvsFromPreRequest(
     tab.value.document.request.preRequestScript,
-    getCombinedEnvVariables()
+    getCombinedEnvVariables(),
+    tab.value.document.request.body.body
   ).then((envs) => {
     if (cancelCalled) return E.left("cancellation" as const)
 

@@ -16,6 +16,6 @@
     "declarationMap": true,
     "sourceMap": true
   },
-  "include": ["./src", "./src/global.d.ts"],
+  "include": ["./src", "./src/global.d.ts", "./src/typpings/crypto-browserify.d.ts"],
   "exclude": ["node_modules", "./src/__tests__"]
 }

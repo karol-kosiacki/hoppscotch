@@ -6,7 +6,8 @@ import Worker from "./worker?worker&inline"
 
 export const runPreRequestScript = (
   preRequestScript: string,
-  envs: TestResult["envs"]
+  envs: TestResult["envs"],
+  requestBody: string
 ): Promise<E.Either<string, TestResult["envs"]>> =>
   new Promise((resolve) => {
     const worker = new Worker()
@@ -20,5 +21,6 @@ export const runPreRequestScript = (
     worker.postMessage({
       preRequestScript,
       envs,
+      requestBody
     })
   })

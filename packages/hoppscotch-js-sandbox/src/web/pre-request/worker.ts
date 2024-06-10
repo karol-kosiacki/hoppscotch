@@ -5,16 +5,17 @@ import { getPreRequestScriptMethods } from "~/shared-utils"
 
 const executeScriptInContext = (
   preRequestScript: string,
-  envs: TestResult["envs"]
+  envs: TestResult["envs"],
+  requestBody: string
 ): TE.TaskEither<string, TestResult["envs"]> => {
   try {
-    const { pw, updatedEnvs } = getPreRequestScriptMethods(envs)
+    const { pw,ph, updatedEnvs } = getPreRequestScriptMethods(envs,requestBody)
 
     // Create a function from the pre request script using the `Function` constructor
     const executeScript = new Function("pw", preRequestScript)
-
+    debugger
     // Execute the script
-    executeScript(pw)
+    executeScript(pw,ph)
 
     return TE.right(updatedEnvs)
   } catch (error) {
@@ -24,9 +25,9 @@ const executeScriptInContext = (
 
 // Listen for messages from the main thread
 self.addEventListener("message", async (event) => {
-  const { preRequestScript, envs } = event.data
+  const { preRequestScript, envs, requestBody } = event.data
 
-  const results = await executeScriptInContext(preRequestScript, envs)()
+  const results = await executeScriptInContext(preRequestScript, envs, requestBody)()
 
   // Post the result back to the main thread
   self.postMessage({ results })

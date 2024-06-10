@@ -3,6 +3,8 @@ import * as E from "fp-ts/Either"
 import * as O from "fp-ts/Option"
 import { pipe } from "fp-ts/lib/function"
 import { cloneDeep } from "lodash-es"
+import * as crypto from "crypto-browserify"
+import { KJUR } from "jsrsasign"
 
 import {
   GlobalEnvItem,
@@ -10,6 +12,58 @@ import {
   TestDescriptor,
   TestResult,
 } from "./types"
+
+
+const generateHDFn = (requestBody:string) => {
+  const result = crypto
+  .createHash("sha256")
+  .update(requestBody)
+  .digest("base64")
+
+  return {
+    value: result
+  }
+}
+
+const generateJwtFn = (header:any, additionalClaims:any, privateKey:any) => {
+  const fixedClaims = {
+    iat: KJUR.jws.IntDate.get("now") - 5,
+    nbf: KJUR.jws.IntDate.get("now") - 5,
+    exp: KJUR.jws.IntDate.get("now + 1hour"),
+  }
+
+  const claimSet = Object.assign(additionalClaims, fixedClaims)
+
+  const result = KJUR.jws.JWS.sign(
+    "RS256",
+    header,
+    claimSet,
+    privateKey
+  )
+
+  return {
+    value: result
+  }
+}
+
+
+const getPHMethods = (requestBody:string) => {
+
+  const internalgenerateHDFn = () => {
+    return generateHDFn(requestBody);
+  }
+
+  return {
+    methods: {
+      ph: {
+        generateJWT: generateJwtFn,
+        generateHD: internalgenerateHDFn,
+      },
+    }
+  }
+}
+
+
 
 const getEnv = (envName: string, envs: TestResult["envs"]) => {
   return O.fromNullable(
@@ -468,9 +522,10 @@ export const createExpectation = (
  * @param envs The current state of the environment variables
  * @returns Object with methods in the `pw` namespace
  */
-export const getPreRequestScriptMethods = (envs: TestResult["envs"]) => {
+export const getPreRequestScriptMethods = (envs: TestResult["envs"], requestBody:string) => {
   const { methods, updatedEnvs } = getSharedMethods(cloneDeep(envs))
-  return { pw: methods, updatedEnvs }
+  const ph = getPHMethods(requestBody);
+  return { pw: methods,ph: ph.methods, updatedEnvs }
 }
 
 /**
